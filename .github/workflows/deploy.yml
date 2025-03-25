@@ -22,7 +22,7 @@ jobs:
           script: |
             echo "=== Проверяем наличие проекта на сервере ==="
             if [ ! -d ~/N8N ]; then
-              echo "Репозиторий не найден. Клонируем заново...."
+              echo "Репозиторий не найден. Клонируем заново..."
               git clone https://github.com/girudomed/N8N.git ~/N8N
             fi
 
