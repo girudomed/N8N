@@ -1,0 +1,35 @@
+version: "3"
+
+services:
+  n8n:
+    image: n8nio/n8n
+    restart: always
+    ports:
+      - "5678:5678"
+    environment:
+      - N8N_BASIC_AUTH_ACTIVE=true
+      - N8N_BASIC_AUTH_USER=admin
+      - N8N_BASIC_AUTH_PASSWORD=fQ7tp9!jswLpz3bA
+      - WEBHOOK_URL=https://n8n.portalgm.ru/
+      - N8N_EMAIL_MODE=smtp
+      - N8N_SMTP_HOST=smtp.gmail.com
+      - N8N_SMTP_PORT=587
+      - N8N_SMTP_USER=ekaterinagirudochat@gmail.com
+      - N8N_SMTP_PASS=bsqc wbyk jdpw rivf
+      - N8N_SMTP_SENDER=ekaterinagirudochat@gmail.com
+      - TZ=Europe/Moscow
+    volumes:
+      - /root/n8n_data:/home/node/.n8n
+
+  nginx:
+    image: nginx:latest
+    restart: always
+    volumes:
+      - /root/nginx/conf.d:/etc/nginx/conf.d
+      - /root/nginx/ssl:/etc/nginx/ssl
+    ports:
+      - "80:80"
+      - "443:443"
+
+volumes:
+  n8n_data:
