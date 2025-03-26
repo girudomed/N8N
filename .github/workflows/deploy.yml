@@ -45,7 +45,7 @@ jobs:
             docker container prune -f || true
 
             echo "=== Проверяем nginx ==="
-            docker exec n8n_nginx_1 nginx -t || echo "nginx тест упал"
+            docker exec n8n_nginx_1 nginx -t || echo "nginx тест упал."
             docker restart n8n_nginx_1
 
             echo "=== Текущие запущенные контейнеры ==="
