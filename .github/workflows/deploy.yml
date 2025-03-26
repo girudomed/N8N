@@ -34,7 +34,7 @@ jobs:
 
             echo "=== Копируем nginx-конфиг ==="
             mkdir -p /root/nginx/conf.d
-            cp -f ./nginx.conf /root/nginx/conf.d/n8n.conf
+            cp -f ./conf.d/n8n.conf /root/nginx/conf.d/n8n.conf
 
             echo "=== Перезапускаем контейнеры через docker-compose ==="
             docker-compose down || true
