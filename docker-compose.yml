@@ -17,6 +17,8 @@ services:
       - N8N_SMTP_USER=ekaterinagirudochat@gmail.com
       - N8N_SMTP_PASS=bsqc wbyk jdpw rivf
       - N8N_SMTP_SENDER=ekaterinagirudochat@gmail.com
+      - N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=true
+      - N8N_RUNNERS_ENABLED=true
       - TZ=Europe/Moscow
     volumes:
       - /root/n8n_data:/home/node/.n8n
