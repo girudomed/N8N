@@ -25,12 +25,12 @@ services:
     image: nginx:latest
     restart: always
     volumes:
-      - /root/nginx/conf.d:/etc/nginx/conf.d
-      - /root/nginx/ssl:/etc/nginx/ssl
-      - /etc/letsencrypt:/etc/letsencrypt
+      - ./nginx.conf:/etc/nginx/conf.d/n8n.conf
+      - certbot-etc:/etc/letsencrypt
     ports:
       - "80:80"
       - "443:443"
 
 volumes:
   n8n_data:
+  certbot-etc:

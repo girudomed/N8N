@@ -32,6 +32,10 @@ jobs:
             git fetch origin
             git reset --hard origin/main
 
+            echo "=== Копируем nginx-конфиг ==="
+            mkdir -p /root/nginx/conf.d
+            cp -f ./nginx.conf /root/nginx/conf.d/n8n.conf
+
             echo "=== Перезапускаем контейнеры через docker-compose ==="
             docker-compose down || true
             docker-compose up --build -d
@@ -39,6 +43,10 @@ jobs:
             echo "=== Чистим старые образы и контейнеры ==="
             docker image prune -af || true
             docker container prune -f || true
+
+            echo "=== Проверяем nginx ==="
+            docker exec n8n_nginx_1 nginx -t || echo "nginx тест упал"
+            docker restart n8n_nginx_1
 
             echo "=== Текущие запущенные контейнеры ==="
             docker ps
