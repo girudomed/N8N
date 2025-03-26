@@ -32,23 +32,23 @@ jobs:
             git fetch origin
             git reset --hard origin/main
 
-            echo "=== Копируем nginx-конфиг ==="
-            mkdir -p /root/nginx/conf.d
-            cp -f ./conf.d/n8n.conf /root/nginx/conf.d/n8n.conf
-
             echo "=== Перезапускаем контейнеры через docker-compose ==="
-            docker-compose down || true
+            docker-compose down -v
             docker-compose up --build -d
 
-            echo "=== Чистим старые образы и контейнеры ==="
-            docker image prune -af || true
-            docker container prune -f || true
+            echo "=== Проверяем конфигурацию Nginx ==="
+            docker exec n8n_nginx_1 nginx -t || (echo "nginx конфиг с ошибкой!" && exit 1)
 
-            echo "=== Проверяем nginx ==="
-            docker exec n8n_nginx_1 nginx -t || echo "nginx тест упал."
+            echo "=== Рестарт nginx ==="
             docker restart n8n_nginx_1
 
-            echo "=== Текущие запущенные контейнеры ==="
+            echo "=== Пауза для прогрева ==="
+            sleep 5
+
+            echo "=== Проверяем доступность n8n.portalgm.ru ==="
+            curl -I https://n8n.portalgm.ru || (echo "Сайт не отвечает!" && exit 1)
+
+            echo "=== Контейнеры после деплоя ==="
             docker ps
 
             echo "=== Деплой N8N завершен успешно ==="
