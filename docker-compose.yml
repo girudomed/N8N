@@ -26,7 +26,7 @@ services:
     restart: always
     volumes:
       - ./conf.d/n8n.conf:/etc/nginx/conf.d/n8n.conf  # ✅ Правильный маппинг конфигура
-      - certbot-etc:/etc/letsencrypt                  # ✅ Для SSL-сертификатов
+      - /etc/letsencrypt:/etc/letsencrypt:ro                  # ✅ Для SSL-сертификатов
     ports:
       - "80:80"
       - "443:443"
