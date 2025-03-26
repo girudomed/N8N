@@ -19,6 +19,7 @@ services:
       - N8N_SMTP_SENDER=ekaterinagirudochat@gmail.com
       - N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=true
       - N8N_RUNNERS_ENABLED=true
+      - N8N_PUSH_BACKEND=websocket
       - TZ=Europe/Moscow
     volumes:
       - /root/n8n_data:/home/node/.n8n
