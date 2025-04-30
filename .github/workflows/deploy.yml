@@ -41,6 +41,9 @@ jobs:
             echo "=== Запускаем автоматическое обновление через update-n8n.sh ==="
             ./update-n8n.sh || (echo "❌ Ошибка при обновлении n8n!" && exit 1)
 
+            echo "=== Пересобираем кастомный Dockerfile без кэша ==="
+            docker-compose build --no-cache || { echo "❌ Ошибка при сборке кастомного образа"; exit 1; }
+
             echo "=== Перезапускаем контейнеры через docker-compose ==="
             docker-compose down
             docker-compose up --build -d
