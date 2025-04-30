@@ -32,8 +32,11 @@ jobs:
             git fetch origin
             git reset --hard origin/main
 
+            echo "=== Делаем резервную копию данных n8n ==="
+            cp -r /root/n8n_data /root/n8n_data_backup_$(date +%F)
+
             echo "=== Перезапускаем контейнеры через docker-compose ==="
-            docker-compose down -v
+            docker-compose down
             docker-compose up --build -d
 
             echo "=== Проверяем конфигурацию Nginx ==="

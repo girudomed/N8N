@@ -2,7 +2,9 @@ version: "3"
 
 services:
   n8n:
-    image: n8nio/n8n
+    build:
+      context: .
+      dockerfile: Dockerfile
     restart: always
     ports:
       - "5678:5678"
@@ -20,6 +22,8 @@ services:
       - N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=true
       - N8N_RUNNERS_ENABLED=true
       - N8N_PUSH_BACKEND=websocket
+      - N8N_ENABLE_PYTHON_EXECUTION=true
+      - N8N_PYTHON_EXECUTABLE=python3
       - TZ=Europe/Moscow
     volumes:
       - /root/n8n_data:/home/node/.n8n
