@@ -35,6 +35,12 @@ jobs:
             echo "=== Делаем резервную копию данных n8n ==="
             cp -r /root/n8n_data /root/n8n_data_backup_$(date +%F)
 
+            echo "=== Делаем update-n8n.sh исполняемым ==="
+            chmod +x update-n8n.sh
+
+            echo "=== Запускаем автоматическое обновление через update-n8n.sh ==="
+            ./update-n8n.sh || (echo "❌ Ошибка при обновлении n8n!" && exit 1)
+
             echo "=== Перезапускаем контейнеры через docker-compose ==="
             docker-compose down
             docker-compose up --build -d
