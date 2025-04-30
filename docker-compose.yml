@@ -34,7 +34,7 @@ services:
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf
       - ./conf.d/n8n.conf:/etc/nginx/conf.d/n8n.conf  # ✅ Правильный маппинг конфигура
-      - /etc/letsencrypt:/etc/letsencrypt:ro                  # ✅ Для SSL-сертификатов
+      - /etc/letsencrypt:/etc/letsencrypt:ro                  # ✅ Для SSL-сертификатов.
     ports:
       - "80:80"
       - "443:443"
