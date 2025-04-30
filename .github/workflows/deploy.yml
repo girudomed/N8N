@@ -52,7 +52,7 @@ jobs:
             docker restart n8n_nginx_1
 
             echo "=== Пауза для прогрева ==="
-            sleep 5
+            sleep 20
 
             echo "=== Проверяем доступность n8n.portalgm.ru ==="
             curl -I https://n8n.portalgm.ru || (echo "Сайт не отвечает!" && exit 1)
