@@ -24,6 +24,7 @@ services:
       - N8N_PUSH_BACKEND=websocket
       - N8N_ENABLE_PYTHON_EXECUTION=true
       - N8N_PYTHON_EXECUTABLE=python3
+      - N8N_PYTHON_MODULES=pymysql,requests,pandas
       - TZ=Europe/Moscow
     volumes:
       - /root/n8n_data:/home/node/.n8n
