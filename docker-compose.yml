@@ -1,4 +1,5 @@
-version: "3"
+#docker-compose.yml
+version: "3.9"
 
 services:
   n8n:
@@ -28,18 +29,7 @@ services:
       - TZ=Europe/Moscow
     volumes:
       - /root/n8n_data:/home/node/.n8n
-
-  nginx:
-    image: nginx:latest
-    restart: always
-    volumes:
-      - ./nginx.conf:/etc/nginx/nginx.conf
-      - ./conf.d/n8n.conf:/etc/nginx/conf.d/n8n.conf  # ✅ Правильный маппинг конфигура
-      - /etc/letsencrypt:/etc/letsencrypt:ro                  # ✅ Для SSL-сертификатов.
-    ports:
-      - "80:80"
-      - "443:443"
-
+      
 volumes:
   n8n_data:
   certbot-etc:
