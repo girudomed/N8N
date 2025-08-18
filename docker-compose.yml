@@ -3,6 +3,7 @@ version: "3.9"
 
 services:
   n8n:
+    container_name: n8n_n8n_1
     build:
       context: .
       dockerfile: Dockerfile
