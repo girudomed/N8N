@@ -36,7 +36,7 @@ services:
 
 networks:
   caddy_net:
-    external: true  # сеть уже создана: docker network create caddy_net
+    external: true  # сеть уже создана: docker network create caddy_net!
 
 volumes:
   n8n_data:
