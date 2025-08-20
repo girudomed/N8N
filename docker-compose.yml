@@ -27,6 +27,7 @@ services:
       - N8N_ENABLE_PYTHON_EXECUTION=true
       - N8N_PYTHON_EXECUTABLE=python3
       - N8N_PYTHON_MODULES=pymysql,requests,pandas
+      - N8N_TRUSTED_PROXIES=0.0.0.0/0
       - TZ=Europe/Moscow
     volumes:
       - /root/n8n_data:/home/node/.n8n
