@@ -28,6 +28,12 @@ services:
       - N8N_PYTHON_EXECUTABLE=python3
       - N8N_PYTHON_MODULES=pymysql,requests,pandas
       - N8N_TRUSTED_PROXIES=0.0.0.0/0
+      - EXECUTIONS_DATA_SAVE_ON_ERROR=none
+      # 👉 новые переменные для авто-чистки Execution History
+      - EXECUTIONS_DATA_SAVE_ON_SUCCESS=none
+      - EXECUTIONS_DATA_PRUNE=true
+      - EXECUTIONS_DATA_MAX_AGE=168
+      - EXECUTIONS_DATA_PRUNE_MAX_COUNT=1000
       - TZ=Europe/Moscow
     volumes:
       - /root/n8n_data:/home/node/.n8n
