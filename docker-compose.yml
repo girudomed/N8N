@@ -81,7 +81,7 @@ services:
       - /root/n8n_data:/home/node/.n8n
     networks:
       - caddy_net
-    # НИ КАКИХ ports: тут быть не должно
+    # НИ КАКИХ ports: тут быть не должно/
 
 networks:
   caddy_net:
