@@ -46,7 +46,7 @@ services:
       - N8N_ENABLE_PYTHON_EXECUTION=true
       - N8N_PYTHON_EXECUTABLE=python3
       - N8N_PYTHON_MODULES=pymysql,requests,pandas
-      - N8N_TRUSTED_PROXIES=0.0.0.0/0
+      - N8N_TRUSTED_PROXIES=0.0.0.0/0,::/0
       - N8N_SECURE_COOKIE=false
       - EXECUTIONS_DATA_SAVE_ON_ERROR=none
       # 👉 новые переменные для авто-чистки Execution History!
