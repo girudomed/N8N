@@ -22,8 +22,9 @@ jobs:
           script: |
             set -Eeuo pipefail
 
-            REPO_DIR=/root/N8N
-            LOG=/var/log/n8n-deploy.log
+            HOST_DOMAIN="https://n8n.portalgm.ru"
+            REPO_DIR="/root/N8N"
+            LOG="/var/log/n8n-deploy.log"
             touch "$LOG" && chmod 644 "$LOG" || true
 
             echo "=== [deploy] start ===" | tee -a "$LOG"
@@ -50,17 +51,48 @@ jobs:
             echo "[deploy] running nightly-update-n8n.sh --force" | tee -a "$LOG"
             "$REPO_DIR/nightly-update-n8n.sh" --force | tee -a "$LOG"
 
-            # 4) (опционально) лёгкая ротация архивов, чтобы не копились
-            #    — оставляем последние 2 data-архива и последний image-архив
+            # 4) Лёгкая ротация архивов, чтобы не копились
             ls -1t /root/n8n_backups/n8n_data_*.tar.gz 2>/dev/null | tail -n +3 | xargs -r rm -f || true
             ls -1t /root/n8n_backups/n8n_image_*.tar.gz 2>/dev/null | tail -n +2 | xargs -r rm -f || true
 
-            # 5) НИКАКОГО nginx: у нас Caddy. Если нужно будет перечитать конфиг:
-            # docker exec caddy_reverse_proxy caddy validate --config /etc/caddy/Caddyfile
-            # docker exec caddy_reverse_proxy caddy reload --config /etc/caddy/Caddyfile
+            # 5) HEALTHCHECK (фаза 1): проверяем, что Caddy и домен отвечают
+            echo "[deploy] health phase1: Caddy /health" | tee -a "$LOG"
+            for i in {1..20}; do
+              if curl -fsSIL --max-time 5 "${HOST_DOMAIN}/health" >/dev/null; then
+                echo "[deploy] /health -> 200 (Caddy OK)" | tee -a "$LOG"
+                break
+              fi
+              echo "[deploy] /health not ready yet (try $i), waiting 5s..." | tee -a "$LOG"
+              sleep 5
+              if [ "$i" -eq 20 ]; then
+                echo "[deploy] FAIL: /health never became ready" | tee -a "$LOG"
+                exit 1
+              fi
+            done
 
-            # 6) Проверка доступности фронта
-            echo "[deploy] health check" | tee -a "$LOG"
-            curl -fsSIL --max-time 15 https://n8n.portalgm.ru >/dev/null
+            # 6) HEALTHCHECK (фаза 2): ждём, пока n8n поднимется за прокси
+            # Успехом считаем 200/204 ИЛИ 401 (BASIC AUTH включён — значит сервис жив)
+            echo "[deploy] health phase2: wait n8n behind proxy" | tee -a "$LOG"
+            READY=0
+            for i in {1..40}; do
+              CODE="$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "${HOST_DOMAIN}/")"
+              if [ "$CODE" = "200" ] || [ "$CODE" = "204" ] || [ "$CODE" = "401" ]; then
+                echo "[deploy] n8n ready (HTTP $CODE)" | tee -a "$LOG"
+                READY=1
+                break
+              fi
+              echo "[deploy] n8n not ready yet (HTTP $CODE), try $i/40, wait 5s..." | tee -a "$LOG"
+              sleep 5
+            done
+
+            if [ "$READY" -ne 1 ]; then
+              echo "[deploy] FAIL: n8n did not become ready in time. Dumping diagnostics..." | tee -a "$LOG"
+              docker ps | tee -a "$LOG" || true
+              # попытка угадать имя контейнера n8n
+              N8N_NAME="$(docker ps --format '{{.Names}}' | awk '/(^|[_-])n8n([_-]|$)/{print $1; exit}')"
+              [ -n "$N8N_NAME" ] && docker logs --tail 200 "$N8N_NAME" 2>&1 | tee -a "$LOG" || true
+              docker logs --tail 200 caddy_reverse_proxy 2>&1 | tee -a "$LOG" || true
+              exit 1
+            fi
 
             echo "=== [deploy] done ===" | tee -a "$LOG"
