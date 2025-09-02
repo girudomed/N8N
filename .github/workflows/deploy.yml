@@ -11,56 +11,56 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
-      - name: Set up SSH and deploy
+      - name: Deploy over SSH
         uses: appleboy/ssh-action@v0.1.4
         with:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SSH_KEY }}
           script: |
-            echo "=== Проверяем наличие проекта на сервере ==="
-            if [ ! -d ~/N8N ]; then
-              echo "Репозиторий не найден. Клонируем заново...."
-              git clone https://github.com/girudomed/N8N.git ~/N8N
+            set -Eeuo pipefail
+
+            REPO_DIR=/root/N8N
+            LOG=/var/log/n8n-deploy.log
+            touch "$LOG" && chmod 644 "$LOG" || true
+
+            echo "=== [deploy] start ===" | tee -a "$LOG"
+
+            # 1) Репозиторий
+            if [ ! -d "$REPO_DIR/.git" ]; then
+              echo "[deploy] cloning repo into $REPO_DIR" | tee -a "$LOG"
+              git clone https://github.com/girudomed/N8N.git "$REPO_DIR"
             fi
 
-            cd ~/N8N
-
-            echo "=== Обновляем репозиторий ==="
+            cd "$REPO_DIR"
             git fetch origin
             git reset --hard origin/main
+            echo "[deploy] git reset -> origin/main" | tee -a "$LOG"
 
-            echo "=== Делаем резервную копию данных n8n ==="
-            cp -r /root/n8n_data /root/n8n_data_backup_$(date +%F)
+            # 2) Убедимся, что скрипт обновления на месте и исполняемый
+            if [ ! -x "$REPO_DIR/nightly-update-n8n.sh" ]; then
+              echo "[deploy] making nightly-update-n8n.sh executable" | tee -a "$LOG"
+              chmod +x "$REPO_DIR/nightly-update-n8n.sh"
+            fi
 
-            echo "=== Делаем update-n8n.sh исполняемым ==="
-            chmod +x update-n8n.sh
+            # 3) Один источник правды: запуск апдейтера
+            #    Он сам сделает backup (+архив), build и up -d
+            echo "[deploy] running nightly-update-n8n.sh --force" | tee -a "$LOG"
+            "$REPO_DIR/nightly-update-n8n.sh" --force | tee -a "$LOG"
 
-            echo "=== Запускаем автоматическое обновление через update-n8n.sh ==="
-            ./update-n8n.sh || (echo "❌ Ошибка при обновлении n8n!" && exit 1)
+            # 4) (опционально) лёгкая ротация архивов, чтобы не копились
+            #    — оставляем последние 2 data-архива и последний image-архив
+            ls -1t /root/n8n_backups/n8n_data_*.tar.gz 2>/dev/null | tail -n +3 | xargs -r rm -f || true
+            ls -1t /root/n8n_backups/n8n_image_*.tar.gz 2>/dev/null | tail -n +2 | xargs -r rm -f || true
 
-            echo "=== Пересобираем кастомный Dockerfile без кэша ==="
-            docker-compose build --no-cache || { echo "❌ Ошибка при сборке кастомного образа"; exit 1; }
+            # 5) НИКАКОГО nginx: у нас Caddy. Если нужно будет перечитать конфиг:
+            # docker exec caddy_reverse_proxy caddy validate --config /etc/caddy/Caddyfile
+            # docker exec caddy_reverse_proxy caddy reload --config /etc/caddy/Caddyfile
 
-            echo "=== Перезапускаем контейнеры через docker-compose ==="
-            docker-compose down
-            docker-compose up --build -d
+            # 6) Проверка доступности фронта
+            echo "[deploy] health check" | tee -a "$LOG"
+            curl -fsSIL --max-time 15 https://n8n.portalgm.ru >/dev/null
 
-            echo "=== Проверяем конфигурацию Nginx ==="
-            docker exec n8n_nginx_1 nginx -t || (echo "nginx конфиг с ошибкой!" && exit 1)
-
-            echo "=== Рестарт nginx ==="
-            docker restart n8n_nginx_1
-
-            echo "=== Пауза для прогрева ==="
-            sleep 20
-
-            echo "=== Проверяем доступность n8n.portalgm.ru ==="
-            curl -I https://n8n.portalgm.ru || (echo "Сайт не отвечает!" && exit 1)
-
-            echo "=== Контейнеры после деплоя ==="
-            docker ps
-
-            echo "=== Деплой N8N завершен успешно ==="
+            echo "=== [deploy] done ===" | tee -a "$LOG"
