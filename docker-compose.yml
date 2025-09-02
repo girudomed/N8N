@@ -2,25 +2,6 @@
 version: "3.9"
 
 services:
-  postgres:
-    image: postgres:14-alpine
-    container_name: n8n_postgres
-    restart: always
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB}
-      TZ: Europe/Moscow
-    volumes:
-      - /root/n8n_postgres_data:/var/lib/postgresql/data
-    networks:
-      - caddy_net
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U n8n -d n8n"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
   n8n:
     container_name: n8n_n8n_1
     build:
@@ -28,9 +9,9 @@ services:
       dockerfile: Dockerfile
     restart: always
     environment:
-      - N8N_BASIC_AUTH_ACTIVE=false
-      # - N8N_BASIC_AUTH_USER=${N8N_BASIC_AUTH_USER}
-      # - N8N_BASIC_AUTH_PASSWORD=${N8N_BASIC_AUTH_PASSWORD}
+      - N8N_BASIC_AUTH_ACTIVE=true
+      - N8N_BASIC_AUTH_USER=${N8N_BASIC_AUTH_USER}
+      - N8N_BASIC_AUTH_PASSWORD=${N8N_BASIC_AUTH_PASSWORD}
       - WEBHOOK_URL=https://n8n.portalgm.ru/
       - N8N_PORT=5678
       - N8N_PROTOCOL=https
@@ -46,9 +27,7 @@ services:
       - N8N_ENABLE_PYTHON_EXECUTION=true
       - N8N_PYTHON_EXECUTABLE=python3
       - N8N_PYTHON_MODULES=pymysql,requests,pandas
-      - N8N_PROXY_HOPS=1
-      - N8N_TRUSTED_PROXIES=0.0.0.0/0,::/0
-      - N8N_SECURE_COOKIE=false
+      - N8N_TRUSTED_PROXIES=0.0.0.0/0
       - EXECUTIONS_DATA_SAVE_ON_ERROR=none
       # 👉 новые переменные для авто-чистки Execution History!
       - EXECUTIONS_DATA_SAVE_ON_SUCCESS=none
@@ -68,21 +47,11 @@ services:
       - EXECUTIONS_TIMEOUT=1000000               # 0 = без таймаута
       # (опционально) верхняя граница таймаута, если используете EXECUTIONS_TIMEOUT > 0
       # EXECUTIONS_TIMEOUT_MAX=0
-      # === ВАЖНО: фиксируем encryption key, чтобы импорт cred-ов прошёл ===
-      - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
-      - DB_TYPE=postgresdb
-      - DB_POSTGRESDB_HOST=${DB_POSTGRESDB_HOST}
-      - DB_POSTGRESDB_PORT=${DB_POSTGRESDB_PORT}
-      - DB_POSTGRESDB_DATABASE=${DB_POSTGRESDB_DATABASE}
-      - DB_POSTGRESDB_USER=${DB_POSTGRESDB_USER}
-      - DB_POSTGRESDB_PASSWORD=${DB_POSTGRESDB_PASSWORD}
-
-
     volumes:
       - /root/n8n_data:/home/node/.n8n
     networks:
       - caddy_net
-    # НИ КАКИХ ports: тут быть не должно/
+    # НИ КАКИХ ports: тут быть не должно
 
 networks:
   caddy_net:
