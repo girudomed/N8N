@@ -4,15 +4,18 @@ version: "3.9"
 services:
   postgres:
     image: postgres:14-alpine
-    container_name: n8n_postgres
     restart: always
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
       TZ: Europe/Moscow
+    # РЕКОМЕНДАЦИЯ: используем named volume, чтобы не было проблем с правами на хосте.
+    # Если всё же нужно монтировать host-dir, см. блок ниже (commented).
     volumes:
-      - /root/n8n_postgres_data:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql/data
+      # Для хост-маунта вместо строки выше:
+      # - /root/n8n_postgres_data:/var/lib/postgresql/data
     networks:
       - caddy_net
     healthcheck:
@@ -27,67 +30,65 @@ services:
       dockerfile: Dockerfile
     restart: always
     environment:
-      - N8N_BASIC_AUTH_ACTIVE=false
-      # - N8N_BASIC_AUTH_USER=${N8N_BASIC_AUTH_USER}
-      # - N8N_BASIC_AUTH_PASSWORD=${N8N_BASIC_AUTH_PASSWORD}
-      - WEBHOOK_URL=https://n8n.portalgm.ru/
-      - N8N_PORT=5678
-      - N8N_PROTOCOL=https
-      - N8N_EMAIL_MODE=smtp
-      - N8N_SMTP_HOST=${N8N_SMTP_HOST}
-      - N8N_SMTP_PORT=${N8N_SMTP_PORT}
-      - N8N_SMTP_USER=${N8N_SMTP_USER}
-      - N8N_SMTP_PASS=${N8N_SMTP_PASS}
-      - N8N_SMTP_SENDER=${N8N_SMTP_SENDER}
-      - N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=true
-      - N8N_RUNNERS_ENABLED=true
-      - N8N_PUSH_BACKEND=websocket
-      - N8N_ENABLE_PYTHON_EXECUTION=true
-      - N8N_PYTHON_EXECUTABLE=python3
-      - N8N_PYTHON_MODULES=pymysql,requests,pandas
-      - N8N_TRUST_PROXY=true
-      - N8N_TRUSTED_PROXIES=192.168.96.2/32   # IP контейнера Caddy в сети caddy_net
-      - N8N_PROXY_HOPS=${N8N_PROXY_HOPS:-1}
-      - EXECUTIONS_DATA_SAVE_ON_ERROR=none
-      # авто-чистка истории:
-      - EXECUTIONS_DATA_SAVE_ON_SUCCESS=none
-      - EXECUTIONS_DATA_PRUNE=true
-      - EXECUTIONS_DATA_MAX_AGE=168
-      - EXECUTIONS_DATA_PRUNE_MAX_COUNT=1000
-      - TZ=Europe/Moscow
-      # таймауты:
-      - N8N_REQUEST_TIMEOUT=720000          # мс
-      - N8N_PAYLOAD_SIZE_MAX=256            # MB
-      - EXECUTIONS_TIMEOUT=1000000
-      # база Postgres:
-      - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
-      - DB_TYPE=postgresdb
-      - DB_POSTGRESDB_HOST=postgres
-      - DB_POSTGRESDB_PORT=5432
-      - DB_POSTGRESDB_DATABASE=${POSTGRES_DB}
-      - DB_POSTGRESDB_USER=${POSTGRES_USER}
-      - DB_POSTGRESDB_PASSWORD=${POSTGRES_PASSWORD}
+      N8N_BASIC_AUTH_ACTIVE: "false"
+      WEBHOOK_URL: "https://n8n.portalgm.ru/"
+      N8N_PORT: "5678"
+      N8N_PROTOCOL: "https"
+      N8N_EMAIL_MODE: "smtp"
+      N8N_SMTP_HOST: ${N8N_SMTP_HOST}
+      N8N_SMTP_PORT: ${N8N_SMTP_PORT}
+      N8N_SMTP_USER: ${N8N_SMTP_USER}
+      N8N_SMTP_PASS: ${N8N_SMTP_PASS}
+      N8N_SMTP_SENDER: ${N8N_SMTP_SENDER}
+      N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS: "true"
+      N8N_RUNNERS_ENABLED: "true"
+      N8N_PUSH_BACKEND: "websocket"
+      N8N_ENABLE_PYTHON_EXECUTION: "true"
+      N8N_PYTHON_EXECUTABLE: "python3"
+      N8N_PYTHON_MODULES: "pymysql,requests,pandas"
+      N8N_TRUST_PROXY: "true"
+      # Укажи IP контейнера Caddy или сеть/диапазон. Обычно достаточно 192.168.96.2/32
+      N8N_TRUSTED_PROXIES: "192.168.96.2/32"
+      N8N_PROXY_HOPS: "${N8N_PROXY_HOPS:-1}"
+      EXECUTIONS_DATA_SAVE_ON_ERROR: "none"
+      EXECUTIONS_DATA_SAVE_ON_SUCCESS: "none"
+      EXECUTIONS_DATA_PRUNE: "true"
+      EXECUTIONS_DATA_MAX_AGE: "168"
+      EXECUTIONS_DATA_PRUNE_MAX_COUNT: "1000"
+      TZ: "Europe/Moscow"
+      N8N_REQUEST_TIMEOUT: "720000"
+      N8N_PAYLOAD_SIZE_MAX: "256"
+      EXECUTIONS_TIMEOUT: "1000000"
+      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY}
+      DB_TYPE: "postgresdb"
+      DB_POSTGRESDB_HOST: "postgres"
+      DB_POSTGRESDB_PORT: "5432"
+      DB_POSTGRESDB_DATABASE: ${POSTGRES_DB}
+      DB_POSTGRESDB_USER: ${POSTGRES_USER}
+      DB_POSTGRESDB_PASSWORD: ${POSTGRES_PASSWORD}
     depends_on:
       postgres:
         condition: service_healthy
     volumes:
-      - /root/n8n_data:/home/node/.n8n
+      - n8n_data:/home/node/.n8n
+      # Альтернатива хост-маунта:
+      # - /root/n8n_data:/home/node/.n8n
     networks:
       caddy_net:
         aliases:
-          - n8n     # ГАРАНТИРОВАННОЕ имя, на которое указывает Caddy
+          - n8n
     healthcheck:
-      # Check that n8n is listening on 5678. Use curl (returns 0 on any HTTP response)
-      # so / (or /rest/health) returning 404 won't mark the container unhealthy.
-      test: ["CMD-SHELL", "wget -qO- http://localhost:5678/ >/dev/null 2>&1 || wget -qO- http://localhost:5678/rest/health >/dev/null 2>&1 || exit 1"]
+      # проверяем сначала корень (у тебя он отвечает 200), затем /rest/health
+      test: ["CMD-SHELL", "wget -qO- http://localhost:5678/ >/dev/null 2>&1 || wget -qO- http://localhost:5678/rest/health >/dev/null 2>&1"]
       interval: 15s
       timeout: 5s
       retries: 3
-    # ports: не указываем — доступ только через Caddy
+    # Не пробрасываем порты — доступ через Caddy
 
 networks:
   caddy_net:
-    external: true  # сеть уже создана: docker network create caddy_net
+    external: true
 
 volumes:
+  postgres_data:
   n8n_data:
