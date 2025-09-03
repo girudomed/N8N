@@ -36,7 +36,7 @@ env:
 USAGE
 }
 
-# --- разбор аргументов ---
+# --- разбор аргументов ----
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --cron) RUN_FROM_CRON=1; shift ;;
