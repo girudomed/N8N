@@ -12,22 +12,21 @@ BACKUP_DIR="${BACKUP_DIR:-/root/n8n_backups}"
 LOCK_FILE="${LOCK_FILE:-$DATA_DIR/update.lock}"
 IMAGE_REPO="${IMAGE_REPO:-n8nio/n8n:latest}"            # базовый образ в Dockerfile
 RETAIN_DAYS="${RETAIN_DAYS:-30}"                        # хранить бэкапы N дней
-
-# флаги
-RUN_FROM_CRON=0
-SKIP_BACKUP=0
-FORCE=0
+HOST_DOMAIN="${HOST_DOMAIN:-}"                           # если задан — делаем HTTP healthcheck через Caddy
+HEALTHCHECK=1                                            # можно выключить флагом --no-health
 
 usage() {
   cat <<'USAGE'
-Usage: nightly-update-n8n.sh [--cron] [--skip-backup] [--force] [--compose-dir PATH] [--compose-file FILE]
+Usage: nightly-update-n8n.sh [--cron] [--skip-backup] [--force] [--compose-dir PATH] [--compose-file FILE] [--no-health] [--host-domain URL]
   --cron          помечает запуск из cron (для логов)
   --skip-backup   пропустить архивирование DATA_DIR
   --force         игнорировать существующий lock-файл
   --compose-dir   путь к каталогу с docker-compose.yml (по умолчанию /root/N8N)
   --compose-file  явный путь к docker-compose.yml
+  --no-health     не выполнять HTTP healthcheck после запуска контейнеров
+  --host-domain   домен для healthcheck (например, https://n8n.portalgm.ru). Можно задать переменной HOST_DOMAIN
 env:
-  LOG, COMPOSE_DIR, COMPOSE_FILE, DATA_DIR, BACKUP_DIR, LOCK_FILE, IMAGE_REPO, RETAIN_DAYS — можно задать через окружение
+  LOG, COMPOSE_DIR, COMPOSE_FILE, DATA_DIR, BACKUP_DIR, LOCK_FILE, IMAGE_REPO, RETAIN_DAYS, HOST_DOMAIN — можно задать через окружение
 USAGE
 }
 
@@ -39,6 +38,8 @@ while [[ $# -gt 0 ]]; do
     --force) FORCE=1; shift ;;
     --compose-dir) COMPOSE_DIR="$2"; COMPOSE_FILE="$COMPOSE_DIR/docker-compose.yml"; shift 2 ;;
     --compose-file) COMPOSE_FILE="$2"; COMPOSE_DIR="$(dirname "$2")"; shift 2 ;;
+    --no-health) HEALTHCHECK=0; shift ;;
+    --host|--host-domain) HOST_DOMAIN="$2"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown option: $1"; usage; exit 2 ;;
   esac
@@ -79,7 +80,7 @@ else
 fi
 
 log "=== START n8n update (cron=$RUN_FROM_CRON) ==="
-log "compose_file=$COMPOSE_FILE | data_dir=$DATA_DIR | backup_dir=$BACKUP_DIR | image_repo=$IMAGE_REPO"
+log "compose_file=$COMPOSE_FILE | data_dir=$DATA_DIR | backup_dir=$BACKUP_DIR | image_repo=$IMAGE_REPO | host_domain=${HOST_DOMAIN:-<unset>} | health=${HEALTHCHECK}"
 
 # --- блокировка ---
 if [[ -e "$LOCK_FILE" && $FORCE -eq 0 ]]; then
@@ -90,8 +91,16 @@ mkdir -p "$(dirname "$LOCK_FILE")"
 : > "$LOCK_FILE"
 trap 'rc=$?; rm -f "$LOCK_FILE"; log "Lock удалён. Выход с кодом $rc"; exit $rc' EXIT
 
-# --- бэкап данных ---
-if [[ $SKIP_BACKUP -eq 0 ]]; then
+# --- бэкап данных (с анти-спамом: не дублируем за текущую дату) ---
+TODAY="$(date +%F)"
+DATA_BACKUP_EXISTS="$(ls -1 "$BACKUP_DIR"/n8n_data_"$TODAY"_*.tar.gz 2>/dev/null | head -n1 || true)"
+IMAGE_BACKUP_EXISTS="$(ls -1 "$BACKUP_DIR"/n8n_image_"$TODAY"_*.tar.gz 2>/dev/null | head -n1 || true)"
+SKIP_BACKUP_TODAY=0
+SKIP_IMAGE_BACKUP_TODAY=0
+[[ -n "$DATA_BACKUP_EXISTS" ]] && SKIP_BACKUP_TODAY=1
+[[ -n "$IMAGE_BACKUP_EXISTS" ]] && SKIP_IMAGE_BACKUP_TODAY=1
+
+if [[ $SKIP_BACKUP -eq 0 && $SKIP_BACKUP_TODAY -eq 0 ]]; then
   if [[ -d "$DATA_DIR" ]]; then
     ARCHIVE="$BACKUP_DIR/n8n_data_$(date +'%F_%H%M%S').tar.gz"
     log "Создаю бэкап $DATA_DIR -> $ARCHIVE"
@@ -101,49 +110,64 @@ if [[ $SKIP_BACKUP -eq 0 ]]; then
   else
     log "WARNING: $DATA_DIR не найден — бэкап пропущен"
   fi
-else
+elif [[ $SKIP_BACKUP -eq 1 ]]; then
   log "Бэкап пропущен по флагу --skip-backup"
+else
+  log "Бэкап пропущен — уже есть архив за $TODAY"
 fi
 
 # --- резерв текущего образа контейнера (для отката) ---
-TIMESTAMP="$(date +'%F_%H%M%S')"
-BACKUP_IMG_TAG="n8n_backup:${TIMESTAMP}"
-N8N_CID_FROM_COMPOSE="$("$COMPOSE_BIN" "${COMPOSE_ARGS[@]}" ps -q n8n 2>/dev/null || true)"
-if [[ -n "$N8N_CID_FROM_COMPOSE" ]]; then
-  N8N_CONTAINER="$N8N_CID_FROM_COMPOSE"
+if [[ $SKIP_BACKUP -eq 1 ]]; then
+  log "Снапшот образа пропущен по флагу --skip-backup"
+elif [[ $SKIP_IMAGE_BACKUP_TODAY -eq 1 ]]; then
+  log "Снапшот образа пропущен — уже есть архив за $TODAY"
 else
-  # fallback: ищем по имени контейнера
-  N8N_CONTAINER="$($DOCKER ps --filter "name=n8n_n8n_1" --format '{{.ID}}' | head -n1 || true)"
-  [[ -z "$N8N_CONTAINER" ]] && N8N_CONTAINER="$($DOCKER ps --format '{{.ID}} {{.Names}}' | awk '/(^|_)n8n(_|$)|(^|-)n8n(-|$)/{print $1; exit}')"
-fi
+  TIMESTAMP="$(date +'%F_%H%M%S')"
+  BACKUP_IMG_TAG="n8n_backup:${TIMESTAMP}"
+  N8N_CID_FROM_COMPOSE="$("$COMPOSE_BIN" "${COMPOSE_ARGS[@]}" ps -q n8n 2>/dev/null || true)"
+  if [[ -n "$N8N_CID_FROM_COMPOSE" ]]; then
+    N8N_CONTAINER="$N8N_CID_FROM_COMPOSE"
+  else
+    # fallback: ищем по имени контейнера
+    N8N_CONTAINER="$($DOCKER ps --filter "name=n8n_n8n_1" --format '{{.ID}}' | head -n1 || true)"
+    [[ -z "$N8N_CONTAINER" ]] && N8N_CONTAINER="$($DOCKER ps --format '{{.ID}} {{.Names}}' | awk '/(^|_)n8n(_|$)|(^|-)n8n(-|$)/{print $1; exit}')"
+  fi
 
-if [[ -n "$N8N_CONTAINER" ]]; then
-  CURRENT_IMG_ID="$($DOCKER inspect --format='{{.Image}}' "$N8N_CONTAINER" 2>/dev/null || true)"
-  if [[ -n "$CURRENT_IMG_ID" ]]; then
-    CURRENT_REPOTAG="$($DOCKER images --no-trunc --format '{{.Repository}}:{{.Tag}} {{.ID}}' | awk -v id="$CURRENT_IMG_ID" '$2==id{print $1; exit}')"
-    if [[ -n "$CURRENT_REPOTAG" ]]; then
-      log "Резервирую образ $CURRENT_REPOTAG как $BACKUP_IMG_TAG"
-      $DOCKER tag "$CURRENT_REPOTAG" "$BACKUP_IMG_TAG" || true
+  if [[ -n "$N8N_CONTAINER" ]]; then
+    CURRENT_IMG_ID="$($DOCKER inspect --format='{{.Image}}' "$N8N_CONTAINER" 2>/dev/null || true)"
+    if [[ -n "$CURRENT_IMG_ID" ]]; then
+      CURRENT_REPOTAG="$($DOCKER images --no-trunc --format '{{.Repository}}:{{.Tag}} {{.ID}}' | awk -v id="$CURRENT_IMG_ID" '$2==id{print $1; exit}')"
+      if [[ -n "$CURRENT_REPOTAG" ]]; then
+        log "Резервирую образ $CURRENT_REPOTAG как $BACKUP_IMG_TAG"
+        $DOCKER tag "$CURRENT_REPOTAG" "$BACKUP_IMG_TAG" || true
+      else
+        log "Резервирую image-id $CURRENT_IMG_ID как $BACKUP_IMG_TAG"
+        $DOCKER tag "$CURRENT_IMG_ID" "$BACKUP_IMG_TAG" || true
+      fi
+      BACKUP_IMAGE_TAR="$BACKUP_DIR/n8n_image_${TIMESTAMP}.tar.gz"
+      log "Сохраняю образ в $BACKUP_IMAGE_TAR"
+      if ! $DOCKER save "$BACKUP_IMG_TAG" | gzip > "$BACKUP_IMAGE_TAR" 2>>"$LOG"; then
+        log "WARNING: docker save не удался (образ резервно протегирован)"
+      fi
     else
-      log "Резервирую image-id $CURRENT_IMG_ID как $BACKUP_IMG_TAG"
-      $DOCKER tag "$CURRENT_IMG_ID" "$BACKUP_IMG_TAG" || true
-    fi
-    BACKUP_IMAGE_TAR="$BACKUP_DIR/n8n_image_${TIMESTAMP}.tar.gz"
-    log "Сохраняю образ в $BACKUP_IMAGE_TAR"
-    if ! $DOCKER save "$BACKUP_IMG_TAG" | gzip > "$BACKUP_IMAGE_TAR" 2>>"$LOG"; then
-      log "WARNING: docker save не удался (образ резервно протегирован)"
+      log "WARNING: не удалось получить Image ID контейнера $N8N_CONTAINER"
     fi
   else
-    log "WARNING: не удалось получить Image ID контейнера $N8N_CONTAINER"
+    log "WARNING: контейнер n8n не найден — резерв образа пропущен"
   fi
-else
-  log "WARNING: контейнер n8n не найден — резерв образа пропущен"
 fi
 
-# --- подтягиваем свежий базовый образ, чтобы Dockerfile пересобрался на свежей базе ---
-log "docker pull $IMAGE_REPO"
-if ! $DOCKER pull "$IMAGE_REPO" >>"$LOG" 2>&1; then
-  log "ERROR: docker pull $IMAGE_REPO не удался"; exit 1
+# --- подтягиваем образ, указанный в Dockerfile (если найден), иначе $IMAGE_REPO ---
+PULL_IMAGE="$IMAGE_REPO"
+DF_PATH_GUESS="$(awk -v RS='\0' 'match($0, /dockerfile:[[:space:]]*([^\n]+)/, a){print a[1]}' "$COMPOSE_FILE" 2>/dev/null || true)"
+[[ -z "$DF_PATH_GUESS" ]] && DF_PATH_GUESS="$COMPOSE_DIR/Dockerfile"
+if [[ -f "$DF_PATH_GUESS" ]]; then
+  FROM_IMG="$(awk 'BEGIN{IGNORECASE=1} $1=="FROM"{print $2; exit}' "$DF_PATH_GUESS" 2>/dev/null || true)"
+  [[ -n "$FROM_IMG" ]] && PULL_IMAGE="$FROM_IMG"
+fi
+log "docker pull $PULL_IMAGE"
+if ! $DOCKER pull "$PULL_IMAGE" >>"$LOG" 2>&1; then
+  log "ERROR: docker pull $PULL_IMAGE не удался"; exit 1
 fi
 
 # --- остановка сервисов (без удаления томов!) ---
@@ -177,6 +201,51 @@ if [[ -n "$N8N_CID" ]]; then
   $DOCKER exec -i "$N8N_CID" n8n --version >>"$LOG" 2>&1 || log "WARNING: не удалось получить версию n8n внутри контейнера"
 else
   log "WARNING: контейнер n8n не найден после запуска"
+fi
+
+# --- HEALTHCHECK (опционально) ---
+if [[ "$HEALTHCHECK" -eq 1 && -n "${HOST_DOMAIN}" ]]; then
+  log "HEALTHCHECK phase1: проверяю Caddy ${HOST_DOMAIN}/health"
+  PH1_OK=0
+  for i in {1..20}; do
+    if curl -fsSIL --max-time 5 "${HOST_DOMAIN}/health" >/dev/null 2>&1; then
+      log "HEALTHCHECK: /health -> 200 (Caddy OK)"
+      PH1_OK=1
+      break
+    fi
+    log "HEALTHCHECK: /health not ready yet (try $i/20), wait 5s..."
+    sleep 5
+  done
+  if [[ $PH1_OK -ne 1 ]]; then
+    log "FAIL: /health never became ready"
+    ($DOCKER ps || true) | tee -a "$LOG"
+    [[ -n "$N8N_CID" ]] && ($DOCKER logs --tail 200 "$N8N_CID" || true) | tee -a "$LOG"
+    ($DOCKER logs --tail 200 caddy_reverse_proxy || true) | tee -a "$LOG"
+    exit 1
+  fi
+
+  log "HEALTHCHECK phase2: жду ответ n8n за прокси на ${HOST_DOMAIN}/ (200/204/401)"
+  READY=0
+  for i in {1..40}; do
+    CODE="$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "${HOST_DOMAIN}/")"
+    if [[ "$CODE" = "200" || "$CODE" = "204" || "$CODE" = "401" ]]; then
+      log "HEALTHCHECK: n8n ready (HTTP $CODE)"
+      READY=1
+      break
+    fi
+    log "HEALTHCHECK: n8n not ready yet (HTTP $CODE), try $i/40, wait 5s..."
+    sleep 5
+  done
+
+  if [[ $READY -ne 1 ]]; then
+    log "FAIL: n8n did not become ready in time. Dumping diagnostics..."
+    ($DOCKER ps || true) | tee -a "$LOG"
+    [[ -n "$N8N_CID" ]] && ($DOCKER logs --tail 200 "$N8N_CID" || true) | tee -a "$LOG"
+    ($DOCKER logs --tail 200 caddy_reverse_proxy || true) | tee -a "$LOG"
+    exit 1
+  fi
+else
+  log "HEALTHCHECK: пропущен (HOST_DOMAIN не задан или выключен флагом --no-health)"
 fi
 
 # --- лёгкая ротация бэкапов (по умолчанию старше $RETAIN_DAYS дней) ---

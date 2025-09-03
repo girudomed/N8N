@@ -71,11 +71,18 @@ jobs:
             done
 
             # 6) HEALTHCHECK (фаза 2): ждём, пока n8n поднимется за прокси
-            # Успехом считаем 200/204 ИЛИ 401 (BASIC AUTH включён — значит сервис жив)
+            # ВАЖНО: НЕ /health — у n8n нет такого эндпоинта. Проверяем "/" (SPA/редирект).
+            # Успех: 200/204 или 401 (если включён BASIC AUTH, значит сервис жив).
+            # Фолбэк: если "/" не подходит, пробуем "/rest/health" и принимаем 200.
             echo "[deploy] health phase2: wait n8n behind proxy" | tee -a "$LOG"
             READY=0
             for i in {1..40}; do
               CODE="$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "${HOST_DOMAIN}/")"
+              if [ "$CODE" != "200" ] && [ "$CODE" != "204" ] && [ "$CODE" != "401" ]; then
+                # Фолбэк на /rest/health (существует у n8n)
+                CODE="$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "${HOST_DOMAIN}/rest/health")"
+              fi
+
               if [ "$CODE" = "200" ] || [ "$CODE" = "204" ] || [ "$CODE" = "401" ]; then
                 echo "[deploy] n8n ready (HTTP $CODE)" | tee -a "$LOG"
                 READY=1
