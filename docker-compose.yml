@@ -79,10 +79,10 @@ services:
     healthcheck:
       # Check that n8n is listening on 5678. Use curl (returns 0 on any HTTP response)
       # so / (or /rest/health) returning 404 won't mark the container unhealthy.
-      test: ["CMD-SHELL", "curl -sS http://127.0.0.1:5678 >/dev/null 2>&1 || exit 1"]
-      interval: 10s
+      test: ["CMD-SHELL", "wget -qO- http://localhost:5678/ >/dev/null 2>&1 || wget -qO- http://localhost:5678/rest/health >/dev/null 2>&1 || exit 1"]
+      interval: 15s
       timeout: 5s
-      retries: 5
+      retries: 3
     # ports: не указываем — доступ только через Caddy
 
 networks:
