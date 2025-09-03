@@ -1,4 +1,4 @@
-#docker-compose.yml
+# docker-compose.yml
 version: "3.9"
 
 services:
@@ -20,6 +20,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+
   n8n:
     build:
       context: .
@@ -27,8 +28,8 @@ services:
     restart: always
     environment:
       - N8N_BASIC_AUTH_ACTIVE=false
-      #- N8N_BASIC_AUTH_USER=${N8N_BASIC_AUTH_USER}
-      #- N8N_BASIC_AUTH_PASSWORD=${N8N_BASIC_AUTH_PASSWORD}
+      # - N8N_BASIC_AUTH_USER=${N8N_BASIC_AUTH_USER}
+      # - N8N_BASIC_AUTH_PASSWORD=${N8N_BASIC_AUTH_PASSWORD}
       - WEBHOOK_URL=https://n8n.portalgm.ru/
       - N8N_PORT=5678
       - N8N_PROTOCOL=https
@@ -45,25 +46,20 @@ services:
       - N8N_PYTHON_EXECUTABLE=python3
       - N8N_PYTHON_MODULES=pymysql,requests,pandas
       - N8N_TRUST_PROXY=true
-      - N8N_TRUSTED_PROXIES=192.168.96.0/20
+      - N8N_TRUSTED_PROXIES=192.168.96.2/32   # IP контейнера Caddy в сети caddy_net
       - N8N_PROXY_HOPS=${N8N_PROXY_HOPS:-1}
       - EXECUTIONS_DATA_SAVE_ON_ERROR=none
-      # 👉 новые переменные для авто-чистки Execution History!!
+      # авто-чистка истории:
       - EXECUTIONS_DATA_SAVE_ON_SUCCESS=none
       - EXECUTIONS_DATA_PRUNE=true
       - EXECUTIONS_DATA_MAX_AGE=168
       - EXECUTIONS_DATA_PRUNE_MAX_COUNT=1000
       - TZ=Europe/Moscow
-      # 👉 Тайм-ауты!
-      # Увеличивает общий HTTP-таймаут входящих запросов к n8n
-      - N8N_REQUEST_TIMEOUT=720000         # 300 000 мс = 300 сек
-
-      # Увеличивает допустимый размер входящего тела (если гоняете большие JSON/медиа)
-      - N8N_PAYLOAD_SIZE_MAX=256            # 64 MB
-
-      # Запретить таймаут выполнения воркфлоу (если пользуетесь internal queue)
-      - EXECUTIONS_TIMEOUT=1000000               # 0 = без таймаута
-      # === Переезд на Postgres ===
+      # таймауты:
+      - N8N_REQUEST_TIMEOUT=720000          # мс
+      - N8N_PAYLOAD_SIZE_MAX=256            # MB
+      - EXECUTIONS_TIMEOUT=1000000
+      # база Postgres:
       - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
       - DB_TYPE=postgresdb
       - DB_POSTGRESDB_HOST=postgres
@@ -77,12 +73,20 @@ services:
     volumes:
       - /root/n8n_data:/home/node/.n8n
     networks:
-      - caddy_net
-    # НИ КАКИХ ports: тут быть не должно
+      caddy_net:
+        aliases:
+          - n8n     # ГАРАНТИРОВАННОЕ имя, на которое указывает Caddy
+    healthcheck:
+      # пробуем /health, если нет — /rest/health
+      test: ["CMD-SHELL", "wget -qO- http://localhost:5678/health >/dev/null 2>&1 || wget -qO- http://localhost:5678/rest/health >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    # ports: не указываем — доступ только через Caddy
 
 networks:
   caddy_net:
-    external: true  # сеть уже создана: docker network create caddy_net!
+    external: true  # сеть уже создана: docker network create caddy_net
 
 volumes:
   n8n_data:
