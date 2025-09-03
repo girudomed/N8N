@@ -2,8 +2,7 @@ name: CI/CD for N8N
 
 on:
   push:
-    branches:
-      - main
+    branches: [ main ]
 
 jobs:
   deploy:
@@ -29,7 +28,7 @@ jobs:
 
             echo "=== [deploy] start ===" | tee -a "$LOG"
 
-            # 1) Репозиторий
+            # 1) Репозиторий на сервере
             if [ ! -d "$REPO_DIR/.git" ]; then
               echo "[deploy] cloning repo into $REPO_DIR" | tee -a "$LOG"
               git clone https://github.com/girudomed/N8N.git "$REPO_DIR"
@@ -40,62 +39,66 @@ jobs:
             git reset --hard origin/main
             echo "[deploy] git reset -> origin/main" | tee -a "$LOG"
 
-            # 2) Убедимся, что скрипт обновления на месте и исполняемый
-            if [ ! -x "$REPO_DIR/nightly-update-n8n.sh" ]; then
-              echo "[deploy] making nightly-update-n8n.sh executable" | tee -a "$LOG"
-              chmod +x "$REPO_DIR/nightly-update-n8n.sh"
-            fi
+            # 2) Гарантируем исполняемость апдейтеров (даже если в git кто-то снимет +x)
+            [ -f "$REPO_DIR/update-n8n.sh" ] && chmod +x "$REPO_DIR/update-n8n.sh" || true
+            [ -f "$REPO_DIR/nightly-update-n8n.sh" ] && chmod +x "$REPO_DIR/nightly-update-n8n.sh" || true
 
-            # 3) Один источник правды: запуск апдейтера
-            #    Он сам сделает backup (+архив), build и up -d
-            echo "[deploy] running nightly-update-n8n.sh --force" | tee -a "$LOG"
-            "$REPO_DIR/nightly-update-n8n.sh" --force | tee -a "$LOG"
+            # 3) Обновление n8n (без HTTP-healthcheck: проверим сами ниже)
+            echo "[deploy] running update-n8n.sh --force --no-health" | tee -a "$LOG"
+            "$REPO_DIR/update-n8n.sh" --force --no-health | tee -a "$LOG"
 
-            # 4) Лёгкая ротация архивов, чтобы не копились
-            ls -1t /root/n8n_backups/n8n_data_*.tar.gz 2>/dev/null | tail -n +3 | xargs -r rm -f || true
+            # 4) Ротация бэкапов (держим по 2-3 свежих архива)
+            ls -1t /root/n8n_backups/n8n_data_*.tar.gz  2>/dev/null | tail -n +3 | xargs -r rm -f || true
             ls -1t /root/n8n_backups/n8n_image_*.tar.gz 2>/dev/null | tail -n +2 | xargs -r rm -f || true
 
-            # 5) HEALTHCHECK (фаза 1): проверяем, что Caddy и домен отвечают
+            # 5) HEALTHCHECK (фаза 1): Caddy /health — мягкая проверка
+            # 200 -> ок; 404 -> просто предупреждение и идём дальше; иные коды ждём, но не дольше 20 * 5с.
             echo "[deploy] health phase1: Caddy /health" | tee -a "$LOG"
+            PH1_OK=0
             for i in {1..20}; do
-              if curl -fsSIL --max-time 5 "${HOST_DOMAIN}/health" >/dev/null; then
+              CODE="$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 "${HOST_DOMAIN}/health" || echo "000")"
+              if [ "$CODE" = "200" ]; then
                 echo "[deploy] /health -> 200 (Caddy OK)" | tee -a "$LOG"
+                PH1_OK=1
+                break
+              elif [ "$CODE" = "404" ]; then
+                echo "[deploy] /health -> 404 (не настроен в Caddy; это не критично)" | tee -a "$LOG"
+                PH1_OK=1
                 break
               fi
-              echo "[deploy] /health not ready yet (try $i), waiting 5s..." | tee -a "$LOG"
+              echo "[deploy] /health not ready yet (HTTP $CODE), try $i/20, wait 5s..." | tee -a "$LOG"
               sleep 5
-              if [ "$i" -eq 20 ]; then
-                echo "[deploy] FAIL: /health never became ready" | tee -a "$LOG"
-                exit 1
-              fi
             done
+            if [ "$PH1_OK" -ne 1 ]; then
+              echo "[deploy] WARN: /health так и не стал 200/404 — продолжаю, проверю сам n8n" | tee -a "$LOG"
+            fi
 
-            # 6) HEALTHCHECK (фаза 2): ждём, пока n8n поднимется за прокси
-            # ВАЖНО: НЕ /health — у n8n нет такого эндпоинта. Проверяем "/" (SPA/редирект).
-            # Успех: 200/204 или 401 (если включён BASIC AUTH, значит сервис жив).
-            # Фолбэк: если "/" не подходит, пробуем "/rest/health" и принимаем 200.
+            # 6) HEALTHCHECK (фаза 2): ждём n8n за прокси
+            # Успех: 200/204/401 на "/" (SPA/редирект/BASIC AUTH), иначе пробуем "/rest/health" (ожидаем 200).
             echo "[deploy] health phase2: wait n8n behind proxy" | tee -a "$LOG"
             READY=0
             for i in {1..40}; do
-              CODE="$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "${HOST_DOMAIN}/")"
-              if [ "$CODE" != "200" ] && [ "$CODE" != "204" ] && [ "$CODE" != "401" ]; then
-                # Фолбэк на /rest/health (существует у n8n)
-                CODE="$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "${HOST_DOMAIN}/rest/health")"
-              fi
-
+              CODE="$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "${HOST_DOMAIN}/" || echo "000")"
               if [ "$CODE" = "200" ] || [ "$CODE" = "204" ] || [ "$CODE" = "401" ]; then
-                echo "[deploy] n8n ready (HTTP $CODE)" | tee -a "$LOG"
+                echo "[deploy] n8n ready on / (HTTP $CODE)" | tee -a "$LOG"
                 READY=1
                 break
               fi
-              echo "[deploy] n8n not ready yet (HTTP $CODE), try $i/40, wait 5s..." | tee -a "$LOG"
+
+              CODE_HEALTH="$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "${HOST_DOMAIN}/rest/health" || echo "000")"
+              if [ "$CODE_HEALTH" = "200" ]; then
+                echo "[deploy] n8n ready on /rest/health (HTTP 200)" | tee -a "$LOG"
+                READY=1
+                break
+              fi
+
+              echo "[deploy] n8n not ready yet (/=$CODE, /rest/health=$CODE_HEALTH), try $i/40, wait 5s..." | tee -a "$LOG"
               sleep 5
             done
 
             if [ "$READY" -ne 1 ]; then
               echo "[deploy] FAIL: n8n did not become ready in time. Dumping diagnostics..." | tee -a "$LOG"
               docker ps | tee -a "$LOG" || true
-              # попытка угадать имя контейнера n8n
               N8N_NAME="$(docker ps --format '{{.Names}}' | awk '/(^|[_-])n8n([_-]|$)/{print $1; exit}')"
               [ -n "$N8N_NAME" ] && docker logs --tail 200 "$N8N_NAME" 2>&1 | tee -a "$LOG" || true
               docker logs --tail 200 caddy_reverse_proxy 2>&1 | tee -a "$LOG" || true
