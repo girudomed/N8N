@@ -77,8 +77,9 @@ services:
         aliases:
           - n8n     # ГАРАНТИРОВАННОЕ имя, на которое указывает Caddy
     healthcheck:
-      # пробуем /health, если нет — /rest/health
-      test: ["CMD-SHELL", "wget -qO- http://localhost:5678/health >/dev/null 2>&1 || wget -qO- http://localhost:5678/rest/health >/dev/null 2>&1"]
+      # Check that n8n is listening on 5678. Use curl (returns 0 on any HTTP response)
+      # so / (or /rest/health) returning 404 won't mark the container unhealthy.
+      test: ["CMD-SHELL", "curl -sS http://127.0.0.1:5678 >/dev/null 2>&1 || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
