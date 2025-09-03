@@ -1,5 +1,11 @@
 #!/bin/bash
+
 set -Eeuo pipefail
+
+# --- defaults for flags (safe when running with 'set -u') ---
+: "${RUN_FROM_CRON:=0}"
+: "${SKIP_BACKUP:=0}"
+: "${FORCE:=0}"
 
 # === базовые настройки (переопределяемы переменными окружения) ===
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
@@ -17,7 +23,7 @@ HEALTHCHECK=1                                            # можно выклю
 
 usage() {
   cat <<'USAGE'
-Usage: nightly-update-n8n.sh [--cron] [--skip-backup] [--force] [--compose-dir PATH] [--compose-file FILE] [--no-health] [--host-domain URL]
+Usage: update-n8n.sh [--cron] [--skip-backup] [--force] [--compose-dir PATH] [--compose-file FILE] [--no-health] [--host-domain URL]
   --cron          помечает запуск из cron (для логов)
   --skip-backup   пропустить архивирование DATA_DIR
   --force         игнорировать существующий lock-файл
