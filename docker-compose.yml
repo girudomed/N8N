@@ -21,15 +21,14 @@ services:
       timeout: 5s
       retries: 5
   n8n:
-    container_name: n8n_n8n_1
     build:
       context: .
       dockerfile: Dockerfile
     restart: always
     environment:
-      - N8N_BASIC_AUTH_ACTIVE=true
-      - N8N_BASIC_AUTH_USER=${N8N_BASIC_AUTH_USER}
-      - N8N_BASIC_AUTH_PASSWORD=${N8N_BASIC_AUTH_PASSWORD}
+      - N8N_BASIC_AUTH_ACTIVE=false
+      #- N8N_BASIC_AUTH_USER=${N8N_BASIC_AUTH_USER}
+      #- N8N_BASIC_AUTH_PASSWORD=${N8N_BASIC_AUTH_PASSWORD}
       - WEBHOOK_URL=https://n8n.portalgm.ru/
       - N8N_PORT=5678
       - N8N_PROTOCOL=https
@@ -46,7 +45,7 @@ services:
       - N8N_PYTHON_EXECUTABLE=python3
       - N8N_PYTHON_MODULES=pymysql,requests,pandas
       - N8N_TRUST_PROXY=true
-      - N8N_TRUSTED_PROXIES=192.168.96.2/32
+      - N8N_TRUSTED_PROXIES=192.168.96.0/20
       - N8N_PROXY_HOPS=${N8N_PROXY_HOPS:-1}
       - EXECUTIONS_DATA_SAVE_ON_ERROR=none
       # 👉 новые переменные для авто-чистки Execution History!!
