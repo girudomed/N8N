@@ -28,20 +28,26 @@ jobs:
 
             echo "=== [deploy] start ===" | tee -a "$LOG"
 
-            # 1) Репозиторий на сервере
+          # 1) Репозиторий на сервере
             if [ ! -d "$REPO_DIR/.git" ]; then
               echo "[deploy] cloning repo into $REPO_DIR" | tee -a "$LOG"
               git clone https://github.com/girudomed/N8N.git "$REPO_DIR"
             fi
 
             cd "$REPO_DIR"
+
+          # сохранить локальный .env перед жёстким сбросом
+            [ -f .env ] && cp .env /tmp/.env.keep || true
+
             git fetch origin
             git reset --hard origin/main
             echo "[deploy] git reset -> origin/main" | tee -a "$LOG"
 
+            # вернуть локальный .env обратно
+            [ -f /tmp/.env.keep ] && mv /tmp/.env.keep .env || true
+
             # 2) Гарантируем исполняемость апдейтеров (даже если в git кто-то снимет +x)
             [ -f "$REPO_DIR/update-n8n.sh" ] && chmod +x "$REPO_DIR/update-n8n.sh" || true
-            [ -f "$REPO_DIR/nightly-update-n8n.sh" ] && chmod +x "$REPO_DIR/nightly-update-n8n.sh" || true
 
             # 3) Обновление n8n (без HTTP-healthcheck: проверим сами ниже)
             echo "[deploy] running update-n8n.sh --force --no-health" | tee -a "$LOG"
