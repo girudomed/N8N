@@ -28,7 +28,7 @@ jobs:
 
             echo "=== [deploy] start ===" | tee -a "$LOG"
 
-          # 1) Репозиторий на сервере
+            # 1) Репозиторий на сервере
             if [ ! -d "$REPO_DIR/.git" ]; then
               echo "[deploy] cloning repo into $REPO_DIR" | tee -a "$LOG"
               git clone https://github.com/girudomed/N8N.git "$REPO_DIR"
@@ -36,7 +36,7 @@ jobs:
 
             cd "$REPO_DIR"
 
-          # сохранить локальный .env перед жёстким сбросом
+            # сохранить локальный .env перед жёстким сбросом
             [ -f .env ] && cp .env /tmp/.env.keep || true
 
             git fetch origin
