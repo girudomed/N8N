@@ -168,8 +168,8 @@ PULL_IMAGE="$IMAGE_REPO"
 DF_PATH_GUESS="$(awk -v RS='\0' 'match($0, /dockerfile:[[:space:]]*([^\n]+)/, a){print a[1]}' "$COMPOSE_FILE" 2>/dev/null || true)"
 [[ -z "$DF_PATH_GUESS" ]] && DF_PATH_GUESS="$COMPOSE_DIR/Dockerfile"
 if [[ -f "$DF_PATH_GUESS" ]]; then
-  FROM_IMG="$(awk 'BEGIN{IGNORECASE=1} $1==\"FROM\"{print $2; exit}' \"$DF_PATH_GUESS\" 2>/dev/null || true)"
-  [[ -n \"$FROM_IMG\" ]] && PULL_IMAGE=\"$FROM_IMG\"
+  FROM_IMG="$(awk 'BEGIN{IGNORECASE=1} $1==\"FROM\"{print $2; exit}' "$DF_PATH_GUESS" 2>/dev/null || true)"
+  [[ -n "$FROM_IMG" ]] && PULL_IMAGE="$FROM_IMG"
 fi
 
 # Robust docker pull with retries and extended diagnostics
