@@ -3,112 +3,118 @@ name: CI/CD for N8N
 on:
   push:
     branches: [ main ]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-n8n
+  cancel-in-progress: true
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Deploy over SSH
-        uses: appleboy/ssh-action@v0.1.4
+      # Используем ssh-agent вместо Docker-экшена, чтобы избежать ошибок сборки
+      - name: Start ssh-agent
+        uses: webfactory/ssh-agent@v0.9.0
         with:
-          host: ${{ secrets.SERVER_HOST }}
-          username: ${{ secrets.SERVER_USER }}
-          key: ${{ secrets.SSH_KEY }}
-          script: |
-            set -Eeuo pipefail
+          ssh-private-key: ${{ secrets.SSH_KEY }}
 
-            HOST_DOMAIN="https://n8n.portalgm.ru"
-            REPO_DIR="/root/N8N"
-            LOG="/var/log/n8n-deploy.log"
-            touch "$LOG" && chmod 644 "$LOG" || true
+      - name: Add server to known_hosts
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -H "${{ secrets.SERVER_HOST }}" >> ~/.ssh/known_hosts
 
-            echo "=== [deploy] start ===" | tee -a "$LOG"
+      - name: Remote deploy over SSH
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+        run: |
+          set -Eeuo pipefail
 
-            # 1) Репозиторий на сервере
-            if [ ! -d "$REPO_DIR/.git" ]; then
-              echo "[deploy] cloning repo into $REPO_DIR" | tee -a "$LOG"
-              git clone https://github.com/girudomed/N8N.git "$REPO_DIR"
+          ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=3 "${SERVER_USER}@${SERVER_HOST}" 'bash -s' <<'REMOTE'
+          set -Eeuo pipefail
+
+          HOST_DOMAIN="https://n8n.portalgm.ru"
+          REPO_DIR="/root/N8N"
+          LOG="/var/log/n8n-deploy.log"
+          touch "$LOG" && chmod 644 "$LOG" || true
+
+          echo "=== [deploy] start ===" | tee -a "$LOG"
+
+          # 1) Репозиторий на сервере
+          if [ ! -d "$REPO_DIR/.git" ]; then
+            echo "[deploy] cloning repo into $REPO_DIR" | tee -a "$LOG"
+            git clone https://github.com/girudomed/N8N.git "$REPO_DIR"
+          fi
+
+          cd "$REPO_DIR"
+
+          # сохранить локальный .env перед жёстким сбросом
+          [ -f .env ] && cp .env /tmp/.env.keep || true
+
+          git fetch origin
+          git reset --hard origin/main
+          echo "[deploy] git reset -> origin/main" | tee -a "$LOG"
+
+          # вернуть локальный .env обратно
+          [ -f /tmp/.env.keep ] && mv /tmp/.env.keep .env || true
+
+          # 2) Гарантируем исполняемость апдейтеров (даже если в git кто-то снимет +x)
+          [ -f "$REPO_DIR/update-n8n.sh" ] && chmod +x "$REPO_DIR/update-n8n.sh" || true
+
+          # 3) Обновление n8n (без HTTP-healthcheck: проверим сами ниже)
+          echo "[deploy] running update-n8n.sh --force --no-health" | tee -a "$LOG"
+          "$REPO_DIR/update-n8n.sh" --force --no-health | tee -a "$LOG"
+
+          # 4) Ротация бэкапов (держим по 2-3 свежих архива)
+          ls -1t /root/n8n_backups/n8n_data_*.tar.gz  2>/dev/null | tail -n +3 | xargs -r rm -f || true
+          ls -1t /root/n8n_backups/n8n_image_*.tar.gz 2>/dev/null | tail -n +2 | xargs -r rm -f || true
+
+          # 5) HEALTHCHECK (фаза 1): Caddy /health — мягкая проверка
+          echo "[deploy] health phase1: Caddy /health" | tee -a "$LOG"
+          PH1_OK=0
+          for i in {1..20}; do
+            CODE="$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 "${HOST_DOMAIN}/health" || echo "000")"
+            if [ "$CODE" = "200" ] || [ "$CODE" = "404" ]; then
+              echo "[deploy] /health -> $CODE" | tee -a "$LOG"
+              PH1_OK=1
+              break
             fi
+            echo "[deploy] /health not ready yet (HTTP $CODE), try $i/20, wait 5s..." | tee -a "$LOG"
+            sleep 5
+          done
+          if [ "$PH1_OK" -ne 1 ]; then
+            echo "[deploy] WARN: /health не 200/404 — продолжу" | tee -a "$LOG"
+          fi
 
-            cd "$REPO_DIR"
-
-            # сохранить локальный .env перед жёстким сбросом
-            [ -f .env ] && cp .env /tmp/.env.keep || true
-
-            git fetch origin
-            git reset --hard origin/main
-            echo "[deploy] git reset -> origin/main" | tee -a "$LOG"
-
-            # вернуть локальный .env обратно
-            [ -f /tmp/.env.keep ] && mv /tmp/.env.keep .env || true
-
-            # 2) Гарантируем исполняемость апдейтеров (даже если в git кто-то снимет +x)
-            [ -f "$REPO_DIR/update-n8n.sh" ] && chmod +x "$REPO_DIR/update-n8n.sh" || true
-
-            # 3) Обновление n8n (без HTTP-healthcheck: проверим сами ниже)
-            echo "[deploy] running update-n8n.sh --force --no-health" | tee -a "$LOG"
-            "$REPO_DIR/update-n8n.sh" --force --no-health | tee -a "$LOG"
-
-            # 4) Ротация бэкапов (держим по 2-3 свежих архива)
-            ls -1t /root/n8n_backups/n8n_data_*.tar.gz  2>/dev/null | tail -n +3 | xargs -r rm -f || true
-            ls -1t /root/n8n_backups/n8n_image_*.tar.gz 2>/dev/null | tail -n +2 | xargs -r rm -f || true
-
-            # 5) HEALTHCHECK (фаза 1): Caddy /health — мягкая проверка
-            # 200 -> ок; 404 -> просто предупреждение и идём дальше; иные коды ждём, но не дольше 20 * 5с.
-            echo "[deploy] health phase1: Caddy /health" | tee -a "$LOG"
-            PH1_OK=0
-            for i in {1..20}; do
-              CODE="$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 "${HOST_DOMAIN}/health" || echo "000")"
-              if [ "$CODE" = "200" ]; then
-                echo "[deploy] /health -> 200 (Caddy OK)" | tee -a "$LOG"
-                PH1_OK=1
-                break
-              elif [ "$CODE" = "404" ]; then
-                echo "[deploy] /health -> 404 (не настроен в Caddy; это не критично)" | tee -a "$LOG"
-                PH1_OK=1
-                break
-              fi
-              echo "[deploy] /health not ready yet (HTTP $CODE), try $i/20, wait 5s..." | tee -a "$LOG"
-              sleep 5
-            done
-            if [ "$PH1_OK" -ne 1 ]; then
-              echo "[deploy] WARN: /health так и не стал 200/404 — продолжаю, проверю сам n8n" | tee -a "$LOG"
+          # 6) HEALTHCHECK (фаза 2): ждём n8n за прокси
+          echo "[deploy] health phase2: wait n8n behind proxy" | tee -a "$LOG"
+          READY=0
+          for i in {1..40}; do
+            CODE="$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "${HOST_DOMAIN}/" || echo "000")"
+            CODE_HEALTH="$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "${HOST_DOMAIN}/rest/health" || echo "000")"
+            if [ "$CODE" = "200" ] || [ "$CODE" = "204" ] || [ "$CODE" = "401" ] || [ "$CODE_HEALTH" = "200" ]; then
+              echo "[deploy] n8n ready (/=$CODE, /rest/health=$CODE_HEALTH)" | tee -a "$LOG"
+              READY=1
+              break
             fi
+            echo "[deploy] not ready yet (/=$CODE, /rest/health=$CODE_HEALTH), try $i/40, wait 5s..." | tee -a "$LOG"
+            sleep 5
+          done
 
-            # 6) HEALTHCHECK (фаза 2): ждём n8n за прокси
-            # Успех: 200/204/401 на "/" (SPA/редирект/BASIC AUTH), иначе пробуем "/rest/health" (ожидаем 200).
-            echo "[deploy] health phase2: wait n8n behind proxy" | tee -a "$LOG"
-            READY=0
-            for i in {1..40}; do
-              CODE="$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "${HOST_DOMAIN}/" || echo "000")"
-              if [ "$CODE" = "200" ] || [ "$CODE" = "204" ] || [ "$CODE" = "401" ]; then
-                echo "[deploy] n8n ready on / (HTTP $CODE)" | tee -a "$LOG"
-                READY=1
-                break
-              fi
+          if [ "$READY" -ne 1 ]; then
+            echo "[deploy] FAIL: n8n did not become ready in time. Dumping diagnostics..." | tee -a "$LOG"
+            docker ps | tee -a "$LOG" || true
+            N8N_NAME="$(docker ps --format '{{.Names}}' | awk '/(^|[_-])n8n([_-]|$)/{print $1; exit}')"
+            [ -n "$N8N_NAME" ] && docker logs --tail 200 "$N8N_NAME" 2>&1 | tee -a "$LOG" || true
+            docker logs --tail 200 caddy_reverse_proxy 2>&1 | tee -a "$LOG" || true
+            exit 1
+          fi
 
-              CODE_HEALTH="$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "${HOST_DOMAIN}/rest/health" || echo "000")"
-              if [ "$CODE_HEALTH" = "200" ]; then
-                echo "[deploy] n8n ready on /rest/health (HTTP 200)" | tee -a "$LOG"
-                READY=1
-                break
-              fi
-
-              echo "[deploy] n8n not ready yet (/=$CODE, /rest/health=$CODE_HEALTH), try $i/40, wait 5s..." | tee -a "$LOG"
-              sleep 5
-            done
-
-            if [ "$READY" -ne 1 ]; then
-              echo "[deploy] FAIL: n8n did not become ready in time. Dumping diagnostics..." | tee -a "$LOG"
-              docker ps | tee -a "$LOG" || true
-              N8N_NAME="$(docker ps --format '{{.Names}}' | awk '/(^|[_-])n8n([_-]|$)/{print $1; exit}')"
-              [ -n "$N8N_NAME" ] && docker logs --tail 200 "$N8N_NAME" 2>&1 | tee -a "$LOG" || true
-              docker logs --tail 200 caddy_reverse_proxy 2>&1 | tee -a "$LOG" || true
-              exit 1
-            fi
-
-            echo "=== [deploy] done ===" | tee -a "$LOG"
+          echo "=== [deploy] done ===" | tee -a "$LOG"
+          REMOTE
