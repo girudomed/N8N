@@ -122,4 +122,4 @@ jobs:
             fi
 
             echo "=== [deploy] done ===" | tee -a "$LOG"
-REMOTE
+            REMOTE
