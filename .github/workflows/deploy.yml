@@ -65,47 +65,49 @@ jobs:
           # вернуть локальный .env обратно
           [ -f /tmp/.env.keep ] && mv /tmp/.env.keep .env || true
 
-          # 2) Гарантируем исполняемость апдейтеров (даже если в git кто-то снимет +x)
-          [ -f "$REPO_DIR/update-n8n.sh" ] && chmod +x "$REPO_DIR/update-n8n.sh" || true
+          # 2) Подбираем рабочий образ N8N и фиксируем его в .env
+          choose_image() {
+            for img in "$@"; do
+              [ -z "$img" ] && continue
+              if docker image inspect "$img" >/dev/null 2>&1 || docker pull "$img"; then
+                echo "$img"
+                return 0
+              fi
+            done
+            return 1
+          }
 
-          # 3) Убедиться, что в .env определён N8N_IMAGE; иначе update-n8n.sh может попытаться pull "".
-          if [ ! -f .env ] || ! grep -q '^N8N_IMAGE=' .env; then
-            echo 'N8N_IMAGE=n8nio/n8n:latest' >> .env
+          # Кандидаты: приоритет локального .env, затем реестры по убыванию «надёжности»
+          ENV_IMG=""
+          if [ -f .env ] && grep -q '^N8N_IMAGE=' .env; then
+            ENV_IMG="$(grep -E '^N8N_IMAGE=' .env | tail -n1 | cut -d= -f2-)"
           fi
-          export N8N_IMAGE="$(grep -E '^N8N_IMAGE=' .env | tail -n1 | cut -d= -f2-)"
+          CHOSEN_IMAGE="$(choose_image "$ENV_IMG" \
+            "docker.n8n.io/n8nio/n8n:latest" \
+            "n8nio/n8n:latest" \
+            "ghcr.io/n8n-io/n8n:latest" \
+            "n8n-io/n8n:latest")" || {
+            echo "[deploy] ERROR: не удалось подобрать рабочий образ n8n" | tee -a "$LOG"
+            exit 1
+          }
 
-          # 4) Обновление n8n; при неудаче fallback на альтернативные реестры
-          echo "[deploy] running update-n8n.sh --force --no-health" | tee -a "$LOG"
-          if ! "$REPO_DIR/update-n8n.sh" --force --no-health | tee -a "$LOG"; then
-            echo "[deploy] update failed. Trying registry fallback..." | tee -a "$LOG"
-
-            FALLBACK_IMAGE=""
-            if docker pull "n8nio/n8n:latest" 2>/dev/null | tee -a "$LOG"; then
-              FALLBACK_IMAGE="n8nio/n8n:latest"
-            elif docker pull "ghcr.io/n8n-io/n8n:latest" 2>/dev/null | tee -a "$LOG"; then
-              FALLBACK_IMAGE="ghcr.io/n8n-io/n8n:latest"
-            fi
-
-            if [ -z "$FALLBACK_IMAGE" ]; then
-              echo "[deploy] ERROR: all registry fallbacks failed" | tee -a "$LOG"
-              exit 1
-            fi
-
-            # переписать image в compose и в .env
-            sed -i \
-              -e 's#docker\.n8n\.io/n8nio/n8n:latest#'"$FALLBACK_IMAGE"'#g' \
-              -e 's#\${N8N_IMAGE}#'"$FALLBACK_IMAGE"'#g' \
-              "$COMPOSE_FILE" || true
-
-            if grep -q '^N8N_IMAGE=' .env; then
-              sed -i 's#^N8N_IMAGE=.*#N8N_IMAGE='"$FALLBACK_IMAGE"'#' .env
-            else
-              echo "N8N_IMAGE=$FALLBACK_IMAGE" >> .env
-            fi
-
-            docker compose -f "$COMPOSE_FILE" pull 2>/dev/null || docker-compose -f "$COMPOSE_FILE" pull
-            docker compose -f "$COMPOSE_FILE" up -d 2>/dev/null || docker-compose -f "$COMPOSE_FILE" up -d
+          if grep -q '^N8N_IMAGE=' .env 2>/dev/null; then
+            sed -i 's#^N8N_IMAGE=.*#N8N_IMAGE='"$CHOSEN_IMAGE"'#' .env
+          else
+            echo "N8N_IMAGE=$CHOSEN_IMAGE" >> .env
           fi
+          export N8N_IMAGE="$CHOSEN_IMAGE"
+          echo "[deploy] using image: $N8N_IMAGE" | tee -a "$LOG"
+
+          # 3) Запуск через docker compose напрямую, без update-n8n.sh
+          # Если внутри compose используется ${N8N_IMAGE}, он возьмётся из .env.
+          COMPOSE_BIN="docker compose"
+          $COMPOSE_BIN version >/dev/null 2>&1 || COMPOSE_BIN="docker-compose"
+
+          $COMPOSE_BIN -f "$COMPOSE_FILE" pull || {
+            echo "[deploy] WARN: compose pull вернул ошибку, продолжаю" | tee -a "$LOG"
+          }
+          $COMPOSE_BIN -f "$COMPOSE_FILE" up -d
 
           # 5) Ротация бэкапов (держим по 2-3 свежих архива)
           ls -1t /root/n8n_backups/n8n_data_*.tar.gz  2>/dev/null | tail -n +3 | xargs -r rm -f || true
