@@ -12,13 +12,25 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Deploy over SSH
-        uses: appleboy/ssh-action@v0.1.4
+      - name: Load SSH key
+        uses: webfactory/ssh-agent@v0.9.0
         with:
-          host: ${{ secrets.SERVER_HOST }}
-          username: ${{ secrets.SERVER_USER }}
-          key: ${{ secrets.SSH_KEY }}
-          script: |
+          ssh-private-key: ${{ secrets.SSH_KEY }}
+
+      - name: Add host key
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -H "$SERVER_HOST" >> ~/.ssh/known_hosts
+
+      - name: Deploy via SSH
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+        run: |
+          set -Eeuo pipefail
+          ssh -o StrictHostKeyChecking=yes "${SERVER_USER}@${SERVER_HOST}" 'bash -s' <<'REMOTE'
             set -Eeuo pipefail
 
             HOST_DOMAIN="https://n8n.portalgm.ru"
@@ -58,7 +70,6 @@ jobs:
             ls -1t /root/n8n_backups/n8n_image_*.tar.gz 2>/dev/null | tail -n +2 | xargs -r rm -f || true
 
             # 5) HEALTHCHECK (фаза 1): Caddy /health — мягкая проверка
-            # 200 -> ок; 404 -> просто предупреждение и идём дальше; иные коды ждём, но не дольше 20 * 5с.
             echo "[deploy] health phase1: Caddy /health" | tee -a "$LOG"
             PH1_OK=0
             for i in {1..20}; do
@@ -80,7 +91,6 @@ jobs:
             fi
 
             # 6) HEALTHCHECK (фаза 2): ждём n8n за прокси
-            # Успех: 200/204/401 на "/" (SPA/редирект/BASIC AUTH), иначе пробуем "/rest/health" (ожидаем 200).
             echo "[deploy] health phase2: wait n8n behind proxy" | tee -a "$LOG"
             READY=0
             for i in {1..40}; do
@@ -112,3 +122,4 @@ jobs:
             fi
 
             echo "=== [deploy] done ===" | tee -a "$LOG"
+REMOTE
