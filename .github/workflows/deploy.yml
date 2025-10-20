@@ -41,6 +41,7 @@ jobs:
 
           HOST_DOMAIN="https://n8n.portalgm.ru"
           REPO_DIR="/root/N8N"
+          COMPOSE_FILE="$REPO_DIR/docker-compose.yml"
           LOG="/var/log/n8n-deploy.log"
           touch "$LOG" && chmod 644 "$LOG" || true
 
@@ -67,15 +68,50 @@ jobs:
           # 2) Гарантируем исполняемость апдейтеров (даже если в git кто-то снимет +x)
           [ -f "$REPO_DIR/update-n8n.sh" ] && chmod +x "$REPO_DIR/update-n8n.sh" || true
 
-          # 3) Обновление n8n (без HTTP-healthcheck: проверим сами ниже)
-          echo "[deploy] running update-n8n.sh --force --no-health" | tee -a "$LOG"
-          "$REPO_DIR/update-n8n.sh" --force --no-health | tee -a "$LOG"
+          # 3) Убедиться, что в .env определён N8N_IMAGE; иначе update-n8n.sh может попытаться pull "".
+          if [ ! -f .env ] || ! grep -q '^N8N_IMAGE=' .env; then
+            echo 'N8N_IMAGE=n8nio/n8n:latest' >> .env
+          fi
+          export N8N_IMAGE="$(grep -E '^N8N_IMAGE=' .env | tail -n1 | cut -d= -f2-)"
 
-          # 4) Ротация бэкапов (держим по 2-3 свежих архива)
+          # 4) Обновление n8n; при неудаче fallback на альтернативные реестры
+          echo "[deploy] running update-n8n.sh --force --no-health" | tee -a "$LOG"
+          if ! "$REPO_DIR/update-n8n.sh" --force --no-health | tee -a "$LOG"; then
+            echo "[deploy] update failed. Trying registry fallback..." | tee -a "$LOG"
+
+            FALLBACK_IMAGE=""
+            if docker pull "n8nio/n8n:latest" 2>/dev/null | tee -a "$LOG"; then
+              FALLBACK_IMAGE="n8nio/n8n:latest"
+            elif docker pull "ghcr.io/n8n-io/n8n:latest" 2>/dev/null | tee -a "$LOG"; then
+              FALLBACK_IMAGE="ghcr.io/n8n-io/n8n:latest"
+            fi
+
+            if [ -z "$FALLBACK_IMAGE" ]; then
+              echo "[deploy] ERROR: all registry fallbacks failed" | tee -a "$LOG"
+              exit 1
+            fi
+
+            # переписать image в compose и в .env
+            sed -i \
+              -e 's#docker\.n8n\.io/n8nio/n8n:latest#'"$FALLBACK_IMAGE"'#g' \
+              -e 's#\${N8N_IMAGE}#'"$FALLBACK_IMAGE"'#g' \
+              "$COMPOSE_FILE" || true
+
+            if grep -q '^N8N_IMAGE=' .env; then
+              sed -i 's#^N8N_IMAGE=.*#N8N_IMAGE='"$FALLBACK_IMAGE"'#' .env
+            else
+              echo "N8N_IMAGE=$FALLBACK_IMAGE" >> .env
+            fi
+
+            docker compose -f "$COMPOSE_FILE" pull 2>/dev/null || docker-compose -f "$COMPOSE_FILE" pull
+            docker compose -f "$COMPOSE_FILE" up -d 2>/dev/null || docker-compose -f "$COMPOSE_FILE" up -d
+          fi
+
+          # 5) Ротация бэкапов (держим по 2-3 свежих архива)
           ls -1t /root/n8n_backups/n8n_data_*.tar.gz  2>/dev/null | tail -n +3 | xargs -r rm -f || true
           ls -1t /root/n8n_backups/n8n_image_*.tar.gz 2>/dev/null | tail -n +2 | xargs -r rm -f || true
 
-          # 5) HEALTHCHECK (фаза 1): Caddy /health — мягкая проверка
+          # 6) HEALTHCHECK (фаза 1): Caddy /health — мягкая проверка
           echo "[deploy] health phase1: Caddy /health" | tee -a "$LOG"
           PH1_OK=0
           for i in {1..20}; do
@@ -88,11 +124,9 @@ jobs:
             echo "[deploy] /health not ready yet (HTTP $CODE), try $i/20, wait 5s..." | tee -a "$LOG"
             sleep 5
           done
-          if [ "$PH1_OK" -ne 1 ]; then
-            echo "[deploy] WARN: /health не 200/404 — продолжу" | tee -a "$LOG"
-          fi
+          [ "$PH1_OK" -ne 1 ] && echo "[deploy] WARN: /health не 200/404 — продолжу" | tee -a "$LOG"
 
-          # 6) HEALTHCHECK (фаза 2): ждём n8n за прокси
+          # 7) HEALTHCHECK (фаза 2): ждём n8n за прокси
           echo "[deploy] health phase2: wait n8n behind proxy" | tee -a "$LOG"
           READY=0
           for i in {1..40}; do
