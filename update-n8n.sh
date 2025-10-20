@@ -168,12 +168,47 @@ PULL_IMAGE="$IMAGE_REPO"
 DF_PATH_GUESS="$(awk -v RS='\0' 'match($0, /dockerfile:[[:space:]]*([^\n]+)/, a){print a[1]}' "$COMPOSE_FILE" 2>/dev/null || true)"
 [[ -z "$DF_PATH_GUESS" ]] && DF_PATH_GUESS="$COMPOSE_DIR/Dockerfile"
 if [[ -f "$DF_PATH_GUESS" ]]; then
-  FROM_IMG="$(awk 'BEGIN{IGNORECASE=1} $1=="FROM"{print $2; exit}' "$DF_PATH_GUESS" 2>/dev/null || true)"
-  [[ -n "$FROM_IMG" ]] && PULL_IMAGE="$FROM_IMG"
+  FROM_IMG="$(awk 'BEGIN{IGNORECASE=1} $1==\"FROM\"{print $2; exit}' \"$DF_PATH_GUESS\" 2>/dev/null || true)"
+  [[ -n \"$FROM_IMG\" ]] && PULL_IMAGE=\"$FROM_IMG\"
 fi
-log "docker pull $PULL_IMAGE"
-if ! $DOCKER pull "$PULL_IMAGE" >>"$LOG" 2>&1; then
-  log "ERROR: docker pull $PULL_IMAGE не удался"; exit 1
+
+# Robust docker pull with retries and extended diagnostics
+PULL_ATTEMPTS="${PULL_ATTEMPTS:-3}"
+PULL_DELAY_SECONDS="${PULL_DELAY_SECONDS:-5}"
+PULL_OK=0
+
+log "docker pull $PULL_IMAGE (will try up to $PULL_ATTEMPTS times)"
+for i in $(seq 1 "$PULL_ATTEMPTS"); do
+  log "docker pull attempt $i/$PULL_ATTEMPTS: pulling $PULL_IMAGE"
+  if $DOCKER pull "$PULL_IMAGE" >>"$LOG" 2>&1; then
+    log "docker pull succeeded on attempt $i"
+    PULL_OK=1
+    break
+  else
+    log "WARNING: docker pull attempt $i failed"
+    # collect immediate diagnostics after a failed attempt
+    log "Collecting docker diagnostics (version/info) for attempt $i"
+    $DOCKER version >>"$LOG" 2>&1 || true
+    $DOCKER info >>"$LOG" 2>&1 || true
+    if [[ $i -lt "$PULL_ATTEMPTS" ]]; then
+      sleep_time=$((PULL_DELAY_SECONDS * i))
+      log "Waiting ${sleep_time}s before next attempt..."
+      sleep "$sleep_time"
+    fi
+  fi
+done
+
+if [[ $PULL_OK -ne 1 ]]; then
+  log "ERROR: docker pull $PULL_IMAGE не удался после $PULL_ATTEMPTS попыток"
+  log "Последние строки /var/log/docker (journal) и свободное место могут помочь в диагностике."
+  # Try to append some useful system-level diagnostics to the log (best-effort)
+  if command -v journalctl >/dev/null 2>&1; then
+    log "Appending last 200 lines of docker service journal"
+    journalctl -u docker --no-pager -n 200 >>"$LOG" 2>&1 || true
+  fi
+  df -h >>"$LOG" 2>&1 || true
+  $DOCKER system df >>"$LOG" 2>&1 || true
+  exit 1
 fi
 
 # --- остановка сервисов (без удаления томов!) ---
