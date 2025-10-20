@@ -85,8 +85,7 @@ jobs:
           CHOSEN_IMAGE="$(choose_image "$ENV_IMG" \
             "docker.n8n.io/n8nio/n8n:latest" \
             "n8nio/n8n:latest" \
-            "ghcr.io/n8n-io/n8n:latest" \
-            "n8n-io/n8n:latest")" || {
+            "ghcr.io/n8n-io/n8n:latest")" || {
             echo "[deploy] ERROR: не удалось подобрать рабочий образ n8n" | tee -a "$LOG"
             exit 1
           }

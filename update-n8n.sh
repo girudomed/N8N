@@ -168,8 +168,39 @@ PULL_IMAGE="$IMAGE_REPO"
 DF_PATH_GUESS="$(awk -v RS='\0' 'match($0, /dockerfile:[[:space:]]*([^\n]+)/, a){print a[1]}' "$COMPOSE_FILE" 2>/dev/null || true)"
 [[ -z "$DF_PATH_GUESS" ]] && DF_PATH_GUESS="$COMPOSE_DIR/Dockerfile"
 if [[ -f "$DF_PATH_GUESS" ]]; then
-  FROM_IMG="$(awk 'BEGIN{IGNORECASE=1} $1==\"FROM\"{print $2; exit}' "$DF_PATH_GUESS" 2>/dev/null || true)"
-  [[ -n "$FROM_IMG" ]] && PULL_IMAGE="$FROM_IMG"
+  # Надёжный парсинг строки FROM:
+  # - учитываем опции вида --platform=...
+  # - убираем секцию "AS <name>"
+  # - поддерживаем кавычки
+  RAW_FROM_LINE="$(grep -iE '^[[:space:]]*FROM[[:space:]]+' "$DF_PATH_GUESS" | head -n1 || true)"
+  if [[ -n "$RAW_FROM_LINE" ]]; then
+    log "Dockerfile: raw FROM line: $RAW_FROM_LINE"
+    # Убираем 'FROM' и ведущие пробелы
+    WORKER="$(echo "$RAW_FROM_LINE" | sed -E 's/^[[:space:]]*[Ff][Rr][Oo][Mm][[:space:]]+//')"
+    # Удаляем опции вида --option=value или --option (например --platform=)
+    WORKER="$(echo "$WORKER" | sed -E 's/--[^[:space:]]+[[:space:]]*//g')"
+    # Удаляем 'AS name' секцию (и всё после неё)
+    WORKER="$(echo "$WORKER" | sed -E 's/[[:space:]]+[Aa][Ss][[:space:]].*$//')"
+    # Берём первый токен (обычно это образ)
+    CANDIDATE="$(echo "$WORKER" | awk '{print $1}')"
+    # Убираем кавычки, если есть
+    CANDIDATE="$(echo "$CANDIDATE" | sed -E 's/^["'\'']//; s/["'\'']$//')"
+    # Простая валидация имени образа (разрешённые символы)
+    if [[ -n "$CANDIDATE" && "$CANDIDATE" =~ ^[A-Za-z0-9._\-/:@]+$ ]]; then
+      FROM_IMG="$CANDIDATE"
+      log "Parsed image from Dockerfile: $FROM_IMG"
+      # Подсказка при очевидной опечатке (не меняем автоматически)
+      if echo "$FROM_IMG" | grep -qE 'n8n-io[/]n8n'; then
+        log "WARNING: найден образ '$FROM_IMG' — возможно вы имели в виду 'n8nio/n8n'. Скрипт не исправляет автоматически."
+      fi
+      PULL_IMAGE="$FROM_IMG"
+    else
+      log "WARNING: не удалось корректно распознать образ из Dockerfile (parsed='$CANDIDATE'), буду использовать IMAGE_REPO fallback"
+      FROM_IMG=""
+    fi
+  else
+    log "Dockerfile: FROM строка не найдена"
+  fi
 fi
 
 # Robust docker pull with retries and extended diagnostics
