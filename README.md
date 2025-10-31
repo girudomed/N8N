@@ -67,7 +67,7 @@ N8N/
 🔐 SSH доступ настроен через GitHub Secrets:
 SERVER_HOST, SERVER_USER, SSH_KEY
 
-⸻..
+⸻..ю
 
 🐳 Dockerfile (кастомный образ)
 
