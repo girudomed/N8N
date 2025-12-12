@@ -59,6 +59,7 @@ services:
       N8N_REQUEST_TIMEOUT: "720000"
       N8N_PAYLOAD_SIZE_MAX: "256"
       EXECUTIONS_TIMEOUT: "-1"
+      N8N_TEMP_DIR: ${N8N_TEMP_DIR}
       N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY}
       DB_TYPE: "postgresdb"
       DB_POSTGRESDB_HOST: "postgres"
