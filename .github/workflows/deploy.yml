@@ -91,7 +91,7 @@ jobs:
           }
 
           if grep -q '^N8N_IMAGE=' .env 2>/dev/null; then
-            sed -i 's#^N8N_IMAGE=.*#N8N_IMAGE='"$CHOSEN_IMAGE"'#' .env
+            sed -i "s#^N8N_IMAGE=.*#N8N_IMAGE=$CHOSEN_IMAGE#" .env
           else
             echo "N8N_IMAGE=$CHOSEN_IMAGE" >> .env
           fi
