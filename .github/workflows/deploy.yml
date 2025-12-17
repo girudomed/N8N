@@ -91,7 +91,25 @@ jobs:
           }
 
           if grep -q '^N8N_IMAGE=' .env 2>/dev/null; then
-            sed -i "s#^N8N_IMAGE=.*#N8N_IMAGE=$CHOSEN_IMAGE#" .env
+            TMP_ENV="$(mktemp)"
+            # Используем awk вместо sed, чтобы не экранировать спецсимволы
+            awk -v repl="$CHOSEN_IMAGE" '
+              BEGIN { replaced=0 }
+              /^N8N_IMAGE=/ {
+                if (!replaced) {
+                  print "N8N_IMAGE=" repl
+                  replaced=1
+                }
+                next
+              }
+              { print }
+              END {
+                if (!replaced) {
+                  print "N8N_IMAGE=" repl
+                }
+              }
+            ' .env > "$TMP_ENV"
+            mv "$TMP_ENV" .env
           else
             echo "N8N_IMAGE=$CHOSEN_IMAGE" >> .env
           fi
