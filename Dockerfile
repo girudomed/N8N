@@ -1,4 +1,5 @@
-FROM n8nio/n8n:latest
+ARG N8N_TAG=1.123.6
+FROM n8nio/n8n:${N8N_TAG}
 
 USER root
 
