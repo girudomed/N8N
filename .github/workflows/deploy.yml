@@ -66,17 +66,18 @@ jobs:
           [ -f /tmp/.env.keep ] && mv /tmp/.env.keep .env || true
 
           # 2) Подбираем рабочий образ N8N и фиксируем его в .env
+          CHOSEN_IMAGE=""
           choose_image() {
             for img in "$@"; do
               [ -z "$img" ] && continue
               if docker image inspect "$img" >/dev/null 2>&1; then
-                echo "$img"
+                CHOSEN_IMAGE="$img"
                 return 0
               fi
               # Логируем в файл и stderr, чтобы не ломать вывод функции
               echo "[deploy] pulling image candidate: $img" | tee -a "$LOG" >&2
               if docker pull "$img" >>"$LOG" 2>&1; then
-                echo "$img"
+                CHOSEN_IMAGE="$img"
                 return 0
               fi
             done
@@ -88,10 +89,10 @@ jobs:
           if [ -f .env ] && grep -q '^N8N_IMAGE=' .env; then
             ENV_IMG="$(grep -E '^N8N_IMAGE=' .env | tail -n1 | cut -d= -f2-)"
           fi
-          CHOSEN_IMAGE="$(choose_image "$ENV_IMG" \
+          choose_image "$ENV_IMG" \
             "docker.n8n.io/n8nio/n8n:latest" \
             "n8nio/n8n:latest" \
-            "ghcr.io/n8n-io/n8n:latest")" || {
+            "ghcr.io/n8n-io/n8n:latest" || {
             echo "[deploy] ERROR: не удалось подобрать рабочий образ n8n" | tee -a "$LOG"
             exit 1
           }
