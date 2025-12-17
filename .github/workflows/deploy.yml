@@ -69,7 +69,12 @@ jobs:
           choose_image() {
             for img in "$@"; do
               [ -z "$img" ] && continue
-              if docker image inspect "$img" >/dev/null 2>&1 || docker pull "$img"; then
+              if docker image inspect "$img" >/dev/null 2>&1; then
+                echo "$img"
+                return 0
+              fi
+              echo "[deploy] pulling image candidate: $img" | tee -a "$LOG"
+              if docker pull "$img" >>"$LOG" 2>&1; then
                 echo "$img"
                 return 0
               fi
