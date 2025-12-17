@@ -102,13 +102,23 @@ jobs:
           if [ -f .env ] && grep -q '^N8N_IMAGE=' .env; then
             ENV_IMG="$(grep -E '^N8N_IMAGE=' .env | tail -n1 | cut -d= -f2-)"
           fi
-          choose_image "$ENV_IMG" \
-            "docker.n8n.io/n8nio/n8n:latest" \
-            "n8nio/n8n:latest" \
-            "ghcr.io/n8n-io/n8n:latest" || {
+          PINNED_TAG="${PINNED_TAG:-1.123.6}"
+          PINNED_IMAGES=(
+            "docker.n8n.io/n8nio/n8n:${PINNED_TAG}"
+            "n8nio/n8n:${PINNED_TAG}"
+            "ghcr.io/n8n-io/n8n:${PINNED_TAG}"
+          )
+          if [ -n "$ENV_IMG" ]; then
+            choose_image "$ENV_IMG" "${PINNED_IMAGES[@]}" || {
+              echo "[deploy] ERROR: не удалось подобрать рабочий образ n8n" | tee -a "$LOG"
+              exit 1
+            }
+          else
+            choose_image "${PINNED_IMAGES[@]}" || {
             echo "[deploy] ERROR: не удалось подобрать рабочий образ n8n" | tee -a "$LOG"
             exit 1
           }
+          fi
 
           if grep -q '^N8N_IMAGE=' .env 2>/dev/null; then
             TMP_ENV="$(mktemp)"
