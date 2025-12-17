@@ -43,12 +43,9 @@ services:
       N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS: "true"
       N8N_RUNNERS_ENABLED: "true"
       N8N_PUSH_BACKEND: "websocket"
-      N8N_ENABLE_PYTHON_EXECUTION: "true"
-      N8N_PYTHON_EXECUTABLE: "python3"
-      N8N_PYTHON_MODULES: "pymysql,requests,pandas"
       N8N_TRUST_PROXY: "true"
       # Укажи IP контейнера Caddy или сеть/диапазон. Обычно достаточно 192.168.96.2/32
-      N8N_TRUSTED_PROXIES: "0.0.0.0/0,::/0"
+      N8N_TRUSTED_PROXIES: "192.168.96.0/20"
       N8N_PROXY_HOPS: "${N8N_PROXY_HOPS:-1}"
       EXECUTIONS_DATA_SAVE_ON_ERROR: "none"
       EXECUTIONS_DATA_SAVE_ON_SUCCESS: "none"
