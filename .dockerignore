@@ -1,9 +1,19 @@
-__pycache__
+# Не тащим секреты и временные файлы в контекст сборки
+.env
+.env.*
+*.log
+tmp/
+
+# Кеши и артефакты
+node_modules/
+dist/
+build/
+coverage/
+
+# Python артефакты (если скрипты есть)
+__pycache__/
 *.pyc
 *.pyo
 *.pyd
 .Python
 env/
-build/
-dist/
-*.log
