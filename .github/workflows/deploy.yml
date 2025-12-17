@@ -65,85 +65,14 @@ jobs:
           # вернуть локальный .env обратно
           [ -f /tmp/.env.keep ] && mv /tmp/.env.keep .env || true
 
-          sanitize_env_file() {
-            [ -f .env ] || return 0
-            TMP_CLEAN="$(mktemp)"
-            awk '
-              /^[[:space:]]*#/ { print; next }
-              /^[[:space:]]*$/ { print; next }
-              index($0,"=")==0 { next }
-              { print }
-            ' .env > "$TMP_CLEAN"
-            mv "$TMP_CLEAN" .env
-          }
-          sanitize_env_file
-
-          # 2) Подбираем рабочий образ N8N и фиксируем его в .env
-          CHOSEN_IMAGE=""
-          choose_image() {
-            for img in "$@"; do
-              [ -z "$img" ] && continue
-              if docker image inspect "$img" >/dev/null 2>&1; then
-                CHOSEN_IMAGE="$img"
-                return 0
-              fi
-              # Логируем в файл и stderr, чтобы не ломать вывод функции
-              echo "[deploy] pulling image candidate: $img" | tee -a "$LOG" >&2
-              if docker pull "$img" >>"$LOG" 2>&1; then
-                CHOSEN_IMAGE="$img"
-                return 0
-              fi
-            done
-            return 1
-          }
-
-          # Кандидаты: приоритет локального .env, затем реестры по убыванию «надёжности»
-          ENV_IMG=""
-          if [ -f .env ] && grep -q '^N8N_IMAGE=' .env; then
-            ENV_IMG="$(grep -E '^N8N_IMAGE=' .env | tail -n1 | cut -d= -f2-)"
-          fi
-          PINNED_TAG="${PINNED_TAG:-1.123.6}"
-          PINNED_IMAGES=(
-            "docker.n8n.io/n8nio/n8n:${PINNED_TAG}"
-            "n8nio/n8n:${PINNED_TAG}"
-            "ghcr.io/n8n-io/n8n:${PINNED_TAG}"
-          )
-          if [ -n "$ENV_IMG" ]; then
-            choose_image "$ENV_IMG" "${PINNED_IMAGES[@]}" || {
-              echo "[deploy] ERROR: не удалось подобрать рабочий образ n8n" | tee -a "$LOG"
-              exit 1
-            }
-          else
-            choose_image "${PINNED_IMAGES[@]}" || {
-            echo "[deploy] ERROR: не удалось подобрать рабочий образ n8n" | tee -a "$LOG"
+          # 2) Собираем кастомный образ n8n на основе зафиксированного Dockerfile
+          CUSTOM_IMAGE="${CUSTOM_IMAGE:-n8n-custom:1.123.6}"
+          echo "[deploy] building image $CUSTOM_IMAGE" | tee -a "$LOG"
+          if ! docker build --pull -t "$CUSTOM_IMAGE" . >>"$LOG" 2>&1; then
+            echo "[deploy] ERROR: docker build провалился" | tee -a "$LOG"
             exit 1
-          }
           fi
-
-          if grep -q '^N8N_IMAGE=' .env 2>/dev/null; then
-            TMP_ENV="$(mktemp)"
-            # Используем awk вместо sed, чтобы не экранировать спецсимволы
-            awk -v repl="$CHOSEN_IMAGE" '
-              BEGIN { replaced=0 }
-              /^N8N_IMAGE=/ {
-                if (!replaced) {
-                  print "N8N_IMAGE=" repl
-                  replaced=1
-                }
-                next
-              }
-              { print }
-              END {
-                if (!replaced) {
-                  print "N8N_IMAGE=" repl
-                }
-              }
-            ' .env > "$TMP_ENV"
-            mv "$TMP_ENV" .env
-          else
-            echo "N8N_IMAGE=$CHOSEN_IMAGE" >> .env
-          fi
-          export N8N_IMAGE="$CHOSEN_IMAGE"
+          export N8N_IMAGE="$CUSTOM_IMAGE"
           echo "[deploy] using image: $N8N_IMAGE" | tee -a "$LOG"
 
           # 3) Запуск через docker compose напрямую, без update-n8n.sh
@@ -151,10 +80,7 @@ jobs:
           COMPOSE_BIN="docker compose"
           $COMPOSE_BIN version >/dev/null 2>&1 || COMPOSE_BIN="docker-compose"
 
-          $COMPOSE_BIN -f "$COMPOSE_FILE" pull || {
-            echo "[deploy] WARN: compose pull вернул ошибку, продолжаю" | tee -a "$LOG"
-          }
-          $COMPOSE_BIN -f "$COMPOSE_FILE" up -d
+          $COMPOSE_BIN -f "$COMPOSE_FILE" up -d --remove-orphans
 
           # 5) Ротация бэкапов (держим по 2-3 свежих архива)
           ls -1t /root/n8n_backups/n8n_data_*.tar.gz  2>/dev/null | tail -n +3 | xargs -r rm -f || true

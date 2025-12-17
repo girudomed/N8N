@@ -25,9 +25,7 @@ services:
       retries: 5
 
   n8n:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: ${N8N_IMAGE:-n8n-custom:1.123.6}
     restart: always
     environment:
       N8N_BASIC_AUTH_ACTIVE: "false"
