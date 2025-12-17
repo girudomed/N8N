@@ -65,6 +65,19 @@ jobs:
           # вернуть локальный .env обратно
           [ -f /tmp/.env.keep ] && mv /tmp/.env.keep .env || true
 
+          sanitize_env_file() {
+            [ -f .env ] || return 0
+            TMP_CLEAN="$(mktemp)"
+            awk '
+              /^[[:space:]]*#/ { print; next }
+              /^[[:space:]]*$/ { print; next }
+              index($0,"=")==0 { next }
+              { print }
+            ' .env > "$TMP_CLEAN"
+            mv "$TMP_CLEAN" .env
+          }
+          sanitize_env_file
+
           # 2) Подбираем рабочий образ N8N и фиксируем его в .env
           CHOSEN_IMAGE=""
           choose_image() {
