@@ -73,7 +73,8 @@ jobs:
                 echo "$img"
                 return 0
               fi
-              echo "[deploy] pulling image candidate: $img" | tee -a "$LOG"
+              # Логируем в файл и stderr, чтобы не ломать вывод функции
+              echo "[deploy] pulling image candidate: $img" | tee -a "$LOG" >&2
               if docker pull "$img" >>"$LOG" 2>&1; then
                 echo "$img"
                 return 0
