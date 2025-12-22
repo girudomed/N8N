@@ -4,7 +4,7 @@ version: "3.9"
 services:
   postgres:
     image: postgres:14-alpine
-    restart: always
+    restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -26,7 +26,7 @@ services:
 
   n8n:
     image: ${N8N_IMAGE:-n8n-custom:1.123.6}
-    restart: always
+    restart: unless-stopped
     environment:
       N8N_BASIC_AUTH_ACTIVE: "false"
       WEBHOOK_URL: "https://n8n.portalgm.ru/"
